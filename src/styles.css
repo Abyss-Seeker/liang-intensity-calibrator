@@ -19,9 +19,582 @@ body {
 
 body {
   min-height: 100vh;
+  background: #e8e9e5;
 }
 
 button,
 input {
   font: inherit;
+}
+
+button,
+input,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100svh;
+}
+
+.experience {
+  --strength: 0;
+  --stage-progress: 0;
+  --ink: #171816;
+  --muted: #70746f;
+  --accent: #b52b24;
+  --gold: #c19a49;
+  --thumb-bg: #e8e9e5;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-height: 100svh;
+  overflow: hidden;
+  padding: 30px clamp(22px, 4vw, 62px) 20px;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 50% 46%, rgb(255 255 255 / 65%) 0 18%, transparent 52%),
+    #e8e9e5;
+  transition: color 420ms ease;
+}
+
+.experience::before {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  content: "";
+  background:
+    radial-gradient(circle at 50% 45%, #3b2c24 0, #1d1918 34%, #111 74%),
+    #111;
+  opacity: calc(var(--strength) * 0.94);
+  transition: opacity 140ms linear;
+}
+
+.experience::after {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background-image:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 1.6%) 0 1px, transparent 1px 4px),
+    radial-gradient(circle at 22% 18%, rgb(255 255 255 / 8%) 0 1px, transparent 1.5px);
+  background-size: auto, 7px 7px;
+  mix-blend-mode: soft-light;
+  opacity: 0.28;
+}
+
+.experience[data-stage="4"],
+.experience[data-stage="5"] {
+  --ink: #f4f1e8;
+  --muted: #b8b4a9;
+  --thumb-bg: #1a1715;
+}
+
+.experience[data-stage="5"] {
+  --accent: #c19a49;
+}
+
+.masthead {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  transition: color 360ms ease;
+}
+
+h1 {
+  margin: 0;
+  font-family: "Songti SC", STSong, "SimSun", serif;
+  font-size: clamp(34px, 4.5vw, 64px);
+  font-weight: 800;
+  letter-spacing: -0.09em;
+  line-height: 0.95;
+}
+
+.level-meter {
+  display: grid;
+  min-width: 118px;
+  padding-top: 3px;
+  border-top: 1px solid currentColor;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  text-align: right;
+}
+
+.level-meter span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.level-output {
+  margin-top: 4px;
+  font-size: clamp(16px, 2vw, 23px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+
+.portrait-zone {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.stage-ghost {
+  position: absolute;
+  z-index: -1;
+  top: 44%;
+  left: 50%;
+  width: 100%;
+  margin: 0;
+  color: currentColor;
+  font-family: "Songti SC", STSong, "SimSun", serif;
+  font-size: clamp(150px, 27vw, 420px);
+  font-weight: 900;
+  letter-spacing: -0.16em;
+  line-height: 0.7;
+  text-align: center;
+  white-space: nowrap;
+  opacity: calc(0.035 + var(--strength) * 0.025);
+  transform: translate(-50%, -50%) scale(calc(0.95 + var(--strength) * 0.08));
+  transform-origin: center;
+  transition: opacity 180ms ease;
+}
+
+.portrait-shell {
+  position: relative;
+  width: min(49vh, 550px, 76vw);
+  max-width: 100%;
+  aspect-ratio: 1;
+  filter: drop-shadow(0 28px 38px rgb(18 20 18 / 12%));
+}
+
+.portrait-shell::before {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.portrait-shell::after {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: -13px;
+  left: -13px;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, currentColor 0 12px, transparent 12px calc(100% - 12px), currentColor calc(100% - 12px));
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.portrait-canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 38%, #f7f7f5, #cfd1cf 70%);
+  object-fit: cover;
+}
+
+.imperial-halo {
+  position: absolute;
+  z-index: 0;
+  inset: -9%;
+  border: 1px solid rgb(193 154 73 / 55%);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 54%, rgb(193 154 73 / 15%) 54.4% 55.4%, transparent 55.8%),
+    conic-gradient(from 0deg, transparent, rgb(193 154 73 / 22%), transparent 18%, transparent 32%, rgb(193 154 73 / 17%), transparent 52%, transparent 74%, rgb(193 154 73 / 20%), transparent);
+  opacity: 0;
+  transform: rotate(calc(var(--strength) * 28deg)) scale(0.92);
+  transition: opacity 500ms ease, transform 700ms ease;
+}
+
+.experience[data-stage="5"] .imperial-halo {
+  opacity: 0.8;
+  transform: rotate(calc(var(--strength) * 28deg)) scale(1);
+}
+
+.scan-grid {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 49.88%, rgb(255 255 255 / 15%) 50%, transparent 50.12%),
+    linear-gradient(0deg, transparent 49.88%, rgb(255 255 255 / 11%) 50%, transparent 50.12%);
+  mix-blend-mode: screen;
+  opacity: calc(0.15 - var(--strength) * 0.08);
+}
+
+.frame-corner {
+  position: absolute;
+  z-index: 4;
+  width: 19px;
+  height: 19px;
+  border-color: currentColor;
+  opacity: 0.72;
+}
+
+.frame-corner--tl {
+  top: -7px;
+  left: -7px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.frame-corner--tr {
+  top: -7px;
+  right: -7px;
+  border-top: 2px solid;
+  border-right: 2px solid;
+}
+
+.frame-corner--bl {
+  bottom: -7px;
+  left: -7px;
+  border-bottom: 2px solid;
+  border-left: 2px solid;
+}
+
+.frame-corner--br {
+  right: -7px;
+  bottom: -7px;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+}
+
+.load-state {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #f4f1e8;
+  background: rgb(23 24 22 / 88%);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.load-state[hidden] {
+  display: none;
+}
+
+.load-state.is-error {
+  color: #fff1ef;
+  background: rgb(126 30 25 / 92%);
+}
+
+.stage-readout {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  width: min(49vh, 550px, 76vw);
+  align-items: baseline;
+  margin-top: 12px;
+}
+
+.stage-readout > span {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.stage-index {
+  text-align: right;
+}
+
+.stage-name {
+  min-width: 3.5em;
+  margin: 0;
+  color: currentColor;
+  font-family: "Songti SC", STSong, "SimSun", serif;
+  font-size: clamp(38px, 5.2vh, 58px);
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  line-height: 0.9;
+  text-align: center;
+  text-shadow: 0 0 calc(var(--strength) * 24px) rgb(193 154 73 / 46%);
+}
+
+.experience[data-stage="5"] .stage-name {
+  color: #d5b56e;
+}
+
+.control-panel {
+  position: relative;
+  z-index: 10;
+  width: min(760px, 100%);
+  margin: 6px auto 0;
+}
+
+.range-wrap {
+  position: relative;
+  height: 48px;
+}
+
+.tick-track {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  display: grid;
+  grid-template-columns: repeat(31, 1fr);
+  align-items: center;
+  height: 24px;
+  pointer-events: none;
+}
+
+.tick {
+  display: block;
+  width: 1px;
+  height: 7px;
+  justify-self: center;
+  background: currentColor;
+  opacity: 0.2;
+  transition: height 120ms ease, opacity 120ms ease, background 120ms ease;
+}
+
+.tick:nth-child(6n + 1) {
+  height: 18px;
+  opacity: 0.5;
+}
+
+.tick.is-active {
+  height: 13px;
+  background: var(--accent);
+  opacity: 0.95;
+}
+
+.tick.is-active:nth-child(6n + 1) {
+  height: 24px;
+}
+
+.strength-slider {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 48px;
+  margin: 0;
+  cursor: ew-resize;
+  appearance: none;
+  background: transparent;
+  touch-action: pan-y;
+}
+
+.strength-slider:disabled {
+  cursor: wait;
+}
+
+.strength-slider::-webkit-slider-runnable-track {
+  height: 1px;
+  background: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.strength-slider::-webkit-slider-thumb {
+  width: 26px;
+  height: 26px;
+  margin-top: -13px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  appearance: none;
+  background:
+    radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px),
+    var(--thumb-bg);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 22%);
+}
+
+.strength-slider::-moz-range-track {
+  height: 1px;
+  background: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.strength-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 22%);
+}
+
+.strength-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.stage-markers {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  margin: -2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-marker {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  transition: color 140ms ease, transform 140ms ease;
+}
+
+.stage-marker:first-child {
+  text-align: left;
+}
+
+.stage-marker:last-child {
+  text-align: right;
+}
+
+.stage-marker.is-passed {
+  color: color-mix(in srgb, var(--accent) 70%, currentColor);
+}
+
+.stage-marker.is-current {
+  color: currentColor;
+  font-weight: 700;
+  transform: translateY(-2px);
+}
+
+.drag-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.drag-hint span {
+  display: inline-block;
+  margin: 0 6px;
+}
+
+.footer-note {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+@media (max-width: 700px) {
+  .experience {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    padding: 20px 16px 16px;
+  }
+
+  .eyebrow {
+    max-width: 190px;
+    font-size: 8px;
+    line-height: 1.4;
+  }
+
+  h1 {
+    font-size: clamp(34px, 11vw, 48px);
+  }
+
+  .level-meter {
+    min-width: 84px;
+  }
+
+  .level-meter span {
+    font-size: 8px;
+  }
+
+  .portrait-shell,
+  .stage-readout {
+    width: min(78vw, 50vh, 430px);
+  }
+
+  .portrait-zone {
+    justify-content: center;
+    padding-top: 8px;
+  }
+
+  .stage-readout > span {
+    font-size: 8px;
+  }
+
+  .stage-name {
+    font-size: clamp(36px, 10vw, 48px);
+  }
+
+  .control-panel {
+    margin-top: 8px;
+  }
+
+  .stage-marker {
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+
+  .footer-note {
+    display: none;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 701px) {
+  .experience {
+    padding-top: 20px;
+  }
+
+  .portrait-shell,
+  .stage-readout {
+    width: min(43vh, 440px, 70vw);
+  }
+
+  .stage-name {
+    font-size: 36px;
+  }
+
+  .drag-hint,
+  .footer-note {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .imperial-halo {
+    transform: none !important;
+  }
 }
