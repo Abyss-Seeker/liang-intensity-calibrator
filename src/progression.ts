@@ -39,13 +39,13 @@ export function getProgression(rawLevel: number): ProgressionState {
 }
 
 // 社区投票 → 等级映射（流量自适应）。
-// 用平方根压缩：投票人越少、每票影响力越大，随票数增加逐渐放缓，
-// 但累计仍能到达两个极端（0 级「小难梁」/ 30 级「梁祖」），不会永远卡在中间。
+// 用平方根压缩：净票越少、每票影响力越大，随净票增加逐渐放缓，
+// 但累计仍能到达两个极端（0 级「小难梁」/ 30 级「梁祖」）。
+// 时间衰减在 worker 端完成（按天加权），前端拿到的是加权后的 net。
 export const COMMUNITY_BASE_LEVEL = 15;
-export const VOTE_FULL_NET = 100; // 到达满级所需的净票数（可调）
+export const VOTE_FULL_NET = 20; // 20 净票满级
 
-export function communityLevelFromTally(up: number, down: number): number {
-  const net = up - down;
+export function levelFromNet(net: number): number {
   if (net === 0) return COMMUNITY_BASE_LEVEL;
   const magnitude = Math.min(
     1,
@@ -56,14 +56,13 @@ export function communityLevelFromTally(up: number, down: number): number {
   );
 }
 
-// 单票影响力：在当前票数下，再投一票（顺风方向）能改变约多少级。
-// 用于向用户展示「你的一票现在有多重」——票越少时这个值越大。
-export function singleVoteImpact(up: number, down: number): number {
-  const net = up - down;
-  const current = communityLevelFromTally(up, down);
-  const next =
-    net >= 0
-      ? communityLevelFromTally(up + 1, down)
-      : communityLevelFromTally(up, down + 1);
+export function communityLevelFromTally(up: number, down: number): number {
+  return levelFromNet(up - down);
+}
+
+// 单票影响力：在当前加权净票下，再投一票（顺风方向）能改变约多少级。
+export function singleVoteImpact(net: number): number {
+  const current = levelFromNet(net);
+  const next = net >= 0 ? levelFromNet(net + 1) : levelFromNet(net - 1);
   return Math.abs(next - current);
 }

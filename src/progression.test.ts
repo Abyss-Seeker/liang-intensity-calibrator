@@ -67,19 +67,19 @@ describe("communityLevelFromTally", () => {
     expect(first).toBeGreaterThan(tenth);
   });
 
-  it("能到达梁祖 30 级（不会被锁死在中间）", () => {
+  it("20 净票到达梁祖 30 级", () => {
+    expect(communityLevelFromTally(20, 0)).toBe(30);
     expect(communityLevelFromTally(100, 0)).toBe(30);
-    expect(communityLevelFromTally(1000, 0)).toBe(30);
   });
 
-  it("能到达小难梁 0 级", () => {
-    expect(communityLevelFromTally(0, 100)).toBe(0);
+  it("20 净票到达小难梁 0 级", () => {
+    expect(communityLevelFromTally(0, 20)).toBe(0);
   });
 
-  it("单票影响力随票数增加而递减，满级后归零", () => {
-    const early = singleVoteImpact(0, 0);
-    const late = singleVoteImpact(80, 0);
+  it("单票影响力随净票增加而递减，满级后归零", () => {
+    const early = singleVoteImpact(0);
+    const late = singleVoteImpact(15);
     expect(early).toBeGreaterThan(late);
-    expect(singleVoteImpact(200, 0)).toBe(0);
+    expect(singleVoteImpact(30)).toBe(0);
   });
 });

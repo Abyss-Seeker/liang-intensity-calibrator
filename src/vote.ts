@@ -1,12 +1,13 @@
 export interface HistoryEntry {
   t: number;
-  up: number;
-  down: number;
+  level: number;
 }
 
 export interface VoteTally {
   up: number;
   down: number;
+  net: number;
+  level: number;
   history: HistoryEntry[];
 }
 
@@ -26,6 +27,8 @@ export async function fetchVotes(): Promise<VoteTally> {
   return {
     up: data.up ?? 0,
     down: data.down ?? 0,
+    net: data.net ?? 0,
+    level: data.level ?? 15,
     history: data.history ?? [],
   };
 }
@@ -43,6 +46,8 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
   return {
     up: data.up ?? 0,
     down: data.down ?? 0,
+    net: data.net ?? 0,
+    level: data.level ?? 15,
     history: data.history ?? [],
     voted: data.voted,
     reason: data.reason,

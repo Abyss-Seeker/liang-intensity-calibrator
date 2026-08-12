@@ -18,14 +18,16 @@ interface Env {
 
 interface HistoryEntry {
   t: number;
-  up: number;
-  down: number;
+  level: number;
 }
 
-const COUNTS_KEY = "counts";
+const BASE_LEVEL = 15;
+const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
+const WINDOW_DAYS = 30; // 只统计最近 30 天
+const HALF_LIFE_DAYS = 7; // 指数半衰期 7 天，久远的票影响力淡化
 const HISTORY_KEY = "history";
-const HISTORY_MAX_ENTRIES = 200;
-const VOTE_TTL_SECONDS = 24 * 60 * 60; // 同 IP 每 24 小时（一天）一票
+const HISTORY_MAX_ENTRIES = 500;
+const VOTE_TTL_SECONDS = 24 * 60 * 60;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -37,24 +39,53 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-async function readCounts(env: Env): Promise<{ up: number; down: number }> {
-  const raw = await env.VOTES.get(COUNTS_KEY);
-  if (!raw) {
-    return { up: 0, down: 0 };
+function dayKey(offsetDays: number): string {
+  const d = new Date(Date.now() - offsetDays * 86400000);
+  return `d:${d.toISOString().slice(0, 10)}`;
+}
+
+function levelFromNet(net: number): number {
+  if (net === 0) return BASE_LEVEL;
+  const magnitude = Math.min(
+    1,
+    Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET),
+  );
+  return Math.min(
+    30,
+    Math.max(0, BASE_LEVEL + BASE_LEVEL * magnitude * Math.sign(net)),
+  );
+}
+
+async function readTally(
+  env: Env,
+): Promise<{ up: number; down: number; net: number; level: number }> {
+  let weightedUp = 0;
+  let weightedDown = 0;
+  let totalUp = 0;
+  let totalDown = 0;
+  for (let i = 0; i < WINDOW_DAYS; i++) {
+    const raw = await env.VOTES.get(dayKey(i));
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { up?: number; down?: number };
+      const up = parsed.up ?? 0;
+      const down = parsed.down ?? 0;
+      const weight = Math.pow(0.5, i / HALF_LIFE_DAYS);
+      weightedUp += up * weight;
+      weightedDown += down * weight;
+      totalUp += up;
+      totalDown += down;
+    } catch {
+      // 忽略损坏数据
+    }
   }
-  try {
-    const parsed = JSON.parse(raw) as { up?: number; down?: number };
-    return { up: parsed.up ?? 0, down: parsed.down ?? 0 };
-  } catch {
-    return { up: 0, down: 0 };
-  }
+  const net = weightedUp - weightedDown;
+  return { up: totalUp, down: totalDown, net, level: levelFromNet(net) };
 }
 
 async function readHistory(env: Env): Promise<HistoryEntry[]> {
   const raw = await env.VOTES.get(HISTORY_KEY);
-  if (!raw) {
-    return [];
-  }
+  if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
@@ -69,9 +100,9 @@ function clientIp(request: Request): string {
 
 async function handleVote(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET") {
-    const counts = await readCounts(env);
+    const tally = await readTally(env);
     const history = await readHistory(env);
-    return json({ ...counts, history });
+    return json({ ...tally, history });
   }
 
   if (request.method !== "POST") {
@@ -94,29 +125,40 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   const votedKey = `voted:${ip}`;
   const alreadyVoted = await env.VOTES.get(votedKey);
   if (alreadyVoted) {
+    const tally = await readTally(env);
     return json({
-      ...(await readCounts(env)),
+      ...tally,
       history: await readHistory(env),
       voted: false,
       reason: "今天已经投过票了，明天再来吧",
     });
   }
 
-  const counts = await readCounts(env);
-  if (direction === "up") {
-    counts.up += 1;
-  } else {
-    counts.down += 1;
+  const todayKey = dayKey(0);
+  const raw = await env.VOTES.get(todayKey);
+  let up = 0;
+  let down = 0;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { up?: number; down?: number };
+      up = parsed.up ?? 0;
+      down = parsed.down ?? 0;
+    } catch {
+      // 忽略损坏数据
+    }
   }
-  await env.VOTES.put(COUNTS_KEY, JSON.stringify(counts));
+  if (direction === "up") up += 1;
+  else down += 1;
+  await env.VOTES.put(todayKey, JSON.stringify({ up, down }));
   await env.VOTES.put(votedKey, direction, { expirationTtl: VOTE_TTL_SECONDS });
 
+  const tally = await readTally(env);
   const history = await readHistory(env);
-  history.push({ t: Date.now(), up: counts.up, down: counts.down });
-  const trimmedHistory = history.slice(-HISTORY_MAX_ENTRIES);
-  await env.VOTES.put(HISTORY_KEY, JSON.stringify(trimmedHistory));
+  history.push({ t: Date.now(), level: tally.level });
+  const trimmed = history.slice(-HISTORY_MAX_ENTRIES);
+  await env.VOTES.put(HISTORY_KEY, JSON.stringify(trimmed));
 
-  return json({ ...counts, voted: true, history: trimmedHistory });
+  return json({ ...tally, voted: true, history: trimmed });
 }
 
 export default {

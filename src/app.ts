@@ -1,7 +1,7 @@
 import {
   clampPosition,
-  communityLevelFromTally,
   getProgression,
+  levelFromNet,
   MAX_LEVEL,
   singleVoteImpact,
   STAGES,
@@ -16,7 +16,7 @@ export interface AppController {
   setLoading(loaded: number, total: number): void;
   setReady(): void;
   setError(message: string): void;
-  setVotes(up: number, down: number): void;
+  setVotes(up: number, down: number, net: number): void;
   setVoteState(state: VoteState, message?: string): void;
   setHistory(history: HistoryEntry[]): void;
   onVote(handler: VoteHandler): void;
@@ -41,43 +41,90 @@ function createStageMarkers(): string {
   ).join("");
 }
 
-const CHART_WIDTH = 600;
-const CHART_HEIGHT = 140;
-const CHART_PAD = { left: 10, right: 10, top: 10, bottom: 10 };
+type RangeKey = "1h" | "6h" | "24h" | "7d" | "30d";
 
-function renderChart(svg: SVGSVGElement, history: HistoryEntry[]): void {
-  const plotW = CHART_WIDTH - CHART_PAD.left - CHART_PAD.right;
-  const plotH = CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom;
+const RANGES: Record<RangeKey, number> = {
+  "1h": 3_600_000,
+  "6h": 21_600_000,
+  "24h": 86_400_000,
+  "7d": 604_800_000,
+  "30d": 2_592_000_000,
+};
+
+const CHART_W = 600;
+const CHART_H = 200;
+const CHART_PAD = { top: 14, right: 12, bottom: 22, left: 32 };
+
+function formatTime(t: number, rangeKey: RangeKey): string {
+  const d = new Date(t);
+  if (rangeKey === "7d" || rangeKey === "30d") {
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  }
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function renderChart(
+  svg: SVGSVGElement,
+  history: HistoryEntry[],
+  rangeKey: RangeKey,
+): void {
+  const rangeMs = RANGES[rangeKey];
+  const now = Date.now();
+  const from = now - rangeMs;
+  const inRange = history.filter((h) => h.t >= from);
+
+  const plotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
+  const plotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
+
+  const levels = inRange.map((h) => h.level);
+  const minL = levels.length ? Math.min(...levels) : 15;
+  const maxL = levels.length ? Math.max(...levels) : 15;
+  const yMin = Math.max(0, Math.floor(minL - 1));
+  const yMax = Math.min(30, Math.ceil(maxL + 1));
+  const yRange = Math.max(1, yMax - yMin);
+
   const parts: string[] = [];
 
-  for (let stage = 0; stage <= 5; stage++) {
-    const level = stage * 6;
-    const y = CHART_PAD.top + plotH - (level / MAX_LEVEL) * plotH;
+  for (let i = 0; i <= 4; i++) {
+    const level = yMin + (yRange * i) / 4;
+    const y = CHART_PAD.top + plotH - ((level - yMin) / yRange) * plotH;
     parts.push(
-      `<line x1="${CHART_PAD.left}" y1="${y.toFixed(1)}" x2="${
-        CHART_WIDTH - CHART_PAD.right
-      }" y2="${y.toFixed(1)}" class="chart-stage-line" data-stage="${stage}" />`,
+      `<line class="chart-grid" x1="${CHART_PAD.left}" y1="${y.toFixed(1)}" x2="${
+        CHART_W - CHART_PAD.right
+      }" y2="${y.toFixed(1)}" />`,
+    );
+    parts.push(
+      `<text class="chart-tick chart-tick--y" x="${
+        CHART_PAD.left - 6
+      }" y="${(y + 3).toFixed(1)}" text-anchor="end">${Math.round(level)}</text>`,
     );
   }
 
-  if (history.length > 0) {
-    const tMin = history[0].t;
-    const tMax = history[history.length - 1].t;
-    const tRange = Math.max(1, tMax - tMin);
-    const points = history.map((entry) => {
-      const level = communityLevelFromTally(entry.up, entry.down);
-      const x = CHART_PAD.left + ((entry.t - tMin) / tRange) * plotW;
-      const y = CHART_PAD.top + plotH - (level / MAX_LEVEL) * plotH;
-      return { x, y };
-    });
-    const polylinePoints = points
-      .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
-      .join(" ");
-    parts.push(`<polyline class="chart-line" points="${polylinePoints}" />`);
-
-    const last = points[points.length - 1];
+  for (let i = 0; i <= 4; i++) {
+    const t = from + (rangeMs * i) / 4;
+    const x = CHART_PAD.left + (plotW * i) / 4;
     parts.push(
-      `<circle class="chart-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3.5" />`,
+      `<line class="chart-grid" x1="${x.toFixed(1)}" y1="${CHART_PAD.top}" x2="${x.toFixed(
+        1,
+      )}" y2="${CHART_H - CHART_PAD.bottom}" />`,
+    );
+    parts.push(
+      `<text class="chart-tick" x="${x.toFixed(1)}" y="${
+        CHART_H - 8
+      }" text-anchor="middle">${formatTime(t, rangeKey)}</text>`,
+    );
+  }
+
+  if (inRange.length > 0) {
+    const pts = inRange.map((h) => ({
+      x: CHART_PAD.left + ((h.t - from) / rangeMs) * plotW,
+      y: CHART_PAD.top + plotH - ((h.level - yMin) / yRange) * plotH,
+    }));
+    const poly = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+    parts.push(`<polyline class="chart-line" points="${poly}" />`);
+    const last = pts[pts.length - 1];
+    parts.push(
+      `<circle class="chart-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3" />`,
     );
   }
 
@@ -111,7 +158,7 @@ export function mountApp(
           <span class="frame-corner frame-corner--tr" aria-hidden="true"></span>
           <span class="frame-corner frame-corner--bl" aria-hidden="true"></span>
           <span class="frame-corner frame-corner--br" aria-hidden="true"></span>
-          <div class="load-state" role="status">载入连续祖力…</div>
+          <div class="load-state" role="status">正在加载…</div>
         </div>
 
         <div class="stage-readout">
@@ -148,7 +195,17 @@ export function mountApp(
         </div>
 
         <div class="vote-chart">
-          <svg class="vote-chart-svg" viewBox="0 0 600 140" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
+          <div class="chart-toolbar">
+            <span class="chart-current">—</span>
+            <div class="chart-ranges" role="group" aria-label="查看区间">
+              <button type="button" data-range="1h">1h</button>
+              <button type="button" data-range="6h">6h</button>
+              <button type="button" data-range="24h" class="is-active">24h</button>
+              <button type="button" data-range="7d">7d</button>
+              <button type="button" data-range="30d">30d</button>
+            </div>
+          </div>
+          <svg class="vote-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
         </div>
 
         <div class="vote-actions">
@@ -205,7 +262,11 @@ export function mountApp(
     ".vote-community-level",
   )!;
   const voteImpactValue = root.querySelector<HTMLElement>(".vote-impact-value")!;
+  const chartCurrent = root.querySelector<HTMLElement>(".chart-current")!;
   const chartSvg = root.querySelector<SVGSVGElement>(".vote-chart-svg")!;
+  const rangeButtons = Array.from(
+    root.querySelectorAll<HTMLButtonElement>(".chart-ranges button"),
+  );
   const upCount = root.querySelector<HTMLElement>('[data-count="up"]')!;
   const downCount = root.querySelector<HTMLElement>('[data-count="down"]')!;
   const voteButtons = Array.from(
@@ -216,6 +277,8 @@ export function mountApp(
   )!;
 
   let currentPosition = 0;
+  let currentHistory: HistoryEntry[] = [];
+  let currentRange: RangeKey = "24h";
 
   const setLevel = (rawLevel: number): void => {
     const position = clampPosition(rawLevel);
@@ -235,8 +298,6 @@ export function mountApp(
     const strength = position / MAX_LEVEL;
     experience.style.setProperty("--strength", String(strength));
     experience.style.setProperty("--strength-pct", `${strength * 100}%`);
-    // 阶跃式反色：文字要么纯深、要么纯浅，绝不取中间灰，
-    // 避免在中间档位文字颜色与背景重合。切换点 0.75 两侧对比度均 ≥3:1。
     const inkPct = strength >= 0.75 ? 1 : 0;
     experience.style.setProperty("--ink-pct", `${inkPct * 100}%`);
     experience.style.setProperty("--stage-progress", String(state.localProgress));
@@ -252,20 +313,22 @@ export function mountApp(
     onLevelChange(position);
   };
 
-  const setVotes = (up: number, down: number): void => {
+  const setVotes = (up: number, down: number, net: number): void => {
     upCount.textContent = String(up);
     downCount.textContent = String(down);
-    const level = communityLevelFromTally(up, down);
+    const level = levelFromNet(net);
     const state = getProgression(level);
     voteCommunityLevel.textContent = `${state.stage} · ${state.level} 级`;
+    chartCurrent.textContent = `${state.stage} ${state.level} 级`;
 
-    const impact = singleVoteImpact(up, down);
+    const impact = singleVoteImpact(net);
     voteImpactValue.textContent =
       impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(1)} 级`;
   };
 
   const setHistory = (history: HistoryEntry[]): void => {
-    renderChart(chartSvg, history);
+    currentHistory = history;
+    renderChart(chartSvg, currentHistory, currentRange);
   };
 
   const setVoteState = (state: VoteState, message?: string): void => {
@@ -294,6 +357,14 @@ export function mountApp(
     showCommunityButton.addEventListener("click", handler);
   };
 
+  rangeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      currentRange = button.dataset.range as RangeKey;
+      rangeButtons.forEach((b) => b.classList.toggle("is-active", b === button));
+      renderChart(chartSvg, currentHistory, currentRange);
+    });
+  });
+
   slider.addEventListener("input", () => {
     setLevel(Number(slider.value));
   });
@@ -313,7 +384,7 @@ export function mountApp(
     onVote,
     onShowCommunity,
     setLoading(loaded, total) {
-      loadState.textContent = loaded >= total ? "连续祖力已就绪" : "载入连续祖力…";
+      loadState.textContent = loaded >= total ? "连续祖力已就绪" : "正在加载…";
     },
     setReady() {
       slider.disabled = false;

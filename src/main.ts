@@ -1,7 +1,6 @@
 import "./styles.css";
 
 import { type AppController, mountApp } from "./app";
-import { communityLevelFromTally } from "./progression";
 import {
   createEvolutionVideoRenderer,
   type EvolutionVideoRenderer,
@@ -29,9 +28,15 @@ const requestDraw = (level: number): void => {
   renderer?.render(level);
 };
 
-const applyTally = (up: number, down: number, history: HistoryEntry[]): void => {
-  communityLevel = communityLevelFromTally(up, down);
-  controller?.setVotes(up, down);
+const applyTally = (
+  up: number,
+  down: number,
+  net: number,
+  level: number,
+  history: HistoryEntry[],
+): void => {
+  communityLevel = level;
+  controller?.setVotes(up, down, net);
   controller?.setHistory(history);
 };
 
@@ -57,7 +62,7 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally.up, tally.down, tally.history);
+    applyTally(tally.up, tally.down, tally.net, tally.level, tally.history);
     if (isFirstSync) {
       isFirstSync = false;
       controller?.setLevel(communityLevel);
@@ -76,7 +81,8 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.up, result.down, result.history);
+    applyTally(result.up, result.down, result.net, result.level, result.history);
+    animateToLevel(result.level);
     controller?.setVoteState(
       "voted",
       result.voted === false
@@ -95,9 +101,11 @@ controller.onShowCommunity(() => {
 renderer
   .load()
   .then(() => {
-    controller?.setReady();
-    requestDraw(controller?.level ?? 0);
-    void syncVotes();
+    // 视频加载完成后再读社区票数，两者都就绪才隐藏加载层，
+    // 避免首屏卡在小难梁第一帧。
+    void syncVotes().finally(() => {
+      controller?.setReady();
+    });
   })
   .catch(() => {
     controller?.setError("图像加载失败，请刷新重试");

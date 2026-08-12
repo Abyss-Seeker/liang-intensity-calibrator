@@ -31,13 +31,18 @@ function postVote(direction: string): Request {
 }
 
 describe("vote api", () => {
-  it("GET 返回初始 0 票和空历史", async () => {
+  it("GET 返回初始 0 票和中间等级", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/vote"),
       env,
     );
-    expect(await response.json()).toEqual({ up: 0, down: 0, history: [] });
+    const data = await response.json();
+    expect(data.up).toBe(0);
+    expect(data.down).toBe(0);
+    expect(data.net).toBe(0);
+    expect(data.level).toBe(15);
+    expect(data.history).toEqual([]);
   });
 
   it("POST up 增加 up 票并记录历史", async () => {
@@ -47,8 +52,9 @@ describe("vote api", () => {
     expect(data.up).toBe(1);
     expect(data.down).toBe(0);
     expect(data.voted).toBe(true);
+    expect(data.level).toBeGreaterThan(15);
     expect(data.history).toHaveLength(1);
-    expect(data.history[0].up).toBe(1);
+    expect(data.history[0].level).toBe(data.level);
   });
 
   it("同 IP 一天内重复投票被拒绝", async () => {
