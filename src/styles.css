@@ -642,24 +642,28 @@ h1 {
 }
 
 .vote-title {
-  color: var(--muted);
+  color: var(--ink);
+  opacity: 0.72;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.16em;
 }
 
 .vote-state {
-  color: var(--muted);
+  color: var(--ink);
+  opacity: 0.72;
   font-size: 10px;
   letter-spacing: 0.08em;
 }
 
 .vote-state[data-state="voted"] {
-  color: var(--accent);
+  color: var(--ink);
+  opacity: 1;
 }
 
 .vote-state[data-state="error"] {
-  color: var(--accent);
+  color: var(--ink);
+  opacity: 1;
 }
 
 .vote-chart {
@@ -690,14 +694,14 @@ h1 {
 
 .chart-line {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--ink);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .chart-dot {
-  fill: var(--accent);
+  fill: var(--ink);
   stroke: var(--thumb-bg, #e8e9e5);
   stroke-width: 1.5;
 }
@@ -723,7 +727,7 @@ h1 {
 }
 
 .vote-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: currentColor;
   transform: translateY(-1px);
 }
 
@@ -737,11 +741,11 @@ h1 {
 }
 
 .vote-btn--up .vote-arrow {
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .vote-btn--down .vote-arrow {
-  color: #5b9bdc;
+  color: var(--ink);
 }
 
 .vote-label {
@@ -771,7 +775,8 @@ h1 {
 
 .vote-community {
   margin: 0;
-  color: var(--muted);
+  color: var(--ink);
+  opacity: 0.72;
   font-size: 11px;
   letter-spacing: 0.06em;
 }
@@ -783,7 +788,8 @@ h1 {
 
 .vote-impact {
   margin: 0;
-  color: var(--muted);
+  color: var(--ink);
+  opacity: 0.72;
   font-size: 11px;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -800,10 +806,10 @@ h1 {
   width: 100%;
   margin-top: 10px;
   padding: 9px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   border-radius: 9px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--ink);
+  background: color-mix(in srgb, currentColor 8%, transparent);
   cursor: pointer;
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -812,7 +818,7 @@ h1 {
 
 .vote-show-community:hover {
   transform: translateY(-1px);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .vote-show-community:active {
