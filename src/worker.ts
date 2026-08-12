@@ -16,8 +16,16 @@ interface Env {
   VOTES: KVNamespace;
 }
 
+interface HistoryEntry {
+  t: number;
+  up: number;
+  down: number;
+}
+
 const COUNTS_KEY = "counts";
-const VOTE_TTL_SECONDS = 24 * 60 * 60;
+const HISTORY_KEY = "history";
+const HISTORY_MAX_ENTRIES = 200;
+const VOTE_TTL_SECONDS = 24 * 60 * 60; // 同 IP 每 24 小时（一天）一票
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -42,13 +50,28 @@ async function readCounts(env: Env): Promise<{ up: number; down: number }> {
   }
 }
 
+async function readHistory(env: Env): Promise<HistoryEntry[]> {
+  const raw = await env.VOTES.get(HISTORY_KEY);
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "unknown";
 }
 
 async function handleVote(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET") {
-    return json(await readCounts(env));
+    const counts = await readCounts(env);
+    const history = await readHistory(env);
+    return json({ ...counts, history });
   }
 
   if (request.method !== "POST") {
@@ -73,8 +96,9 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   if (alreadyVoted) {
     return json({
       ...(await readCounts(env)),
+      history: await readHistory(env),
       voted: false,
-      reason: "这个 IP 已经投过票了",
+      reason: "今天已经投过票了，明天再来吧",
     });
   }
 
@@ -87,7 +111,12 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   await env.VOTES.put(COUNTS_KEY, JSON.stringify(counts));
   await env.VOTES.put(votedKey, direction, { expirationTtl: VOTE_TTL_SECONDS });
 
-  return json({ ...counts, voted: true });
+  const history = await readHistory(env);
+  history.push({ t: Date.now(), up: counts.up, down: counts.down });
+  const trimmedHistory = history.slice(-HISTORY_MAX_ENTRIES);
+  await env.VOTES.put(HISTORY_KEY, JSON.stringify(trimmedHistory));
+
+  return json({ ...counts, voted: true, history: trimmedHistory });
 }
 
 export default {

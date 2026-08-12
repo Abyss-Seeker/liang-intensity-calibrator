@@ -1,6 +1,13 @@
+export interface HistoryEntry {
+  t: number;
+  up: number;
+  down: number;
+}
+
 export interface VoteTally {
   up: number;
   down: number;
+  history: HistoryEntry[];
 }
 
 export type VoteDirection = "up" | "down";
@@ -16,7 +23,11 @@ export async function fetchVotes(): Promise<VoteTally> {
     throw new Error("读取社区票数失败");
   }
   const data = (await response.json()) as VoteTally;
-  return { up: data.up ?? 0, down: data.down ?? 0 };
+  return {
+    up: data.up ?? 0,
+    down: data.down ?? 0,
+    history: data.history ?? [],
+  };
 }
 
 export async function castVote(direction: VoteDirection): Promise<VoteResponse> {
@@ -29,5 +40,11 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
   if (!response.ok) {
     throw new Error(data.reason ?? "投票失败");
   }
-  return data;
+  return {
+    up: data.up ?? 0,
+    down: data.down ?? 0,
+    history: data.history ?? [],
+    voted: data.voted,
+    reason: data.reason,
+  };
 }

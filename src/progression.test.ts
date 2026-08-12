@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { clampPosition, getProgression } from "./progression";
+import {
+  clampPosition,
+  communityLevelFromTally,
+  getProgression,
+  singleVoteImpact,
+} from "./progression";
 
 describe("getProgression", () => {
   it("把 0 级映射到小难梁与第一段起点", () => {
@@ -46,5 +51,35 @@ describe("getProgression", () => {
     expect(clampPosition(12.35)).toBe(12.35);
     expect(clampPosition(-0.5)).toBe(0);
     expect(clampPosition(30.5)).toBe(30);
+  });
+});
+
+describe("communityLevelFromTally", () => {
+  it("净票为 0 时停留在中间 15 级", () => {
+    expect(communityLevelFromTally(0, 0)).toBe(15);
+  });
+
+  it("票少时每票影响大、随票数增加逐渐放缓", () => {
+    const first =
+      communityLevelFromTally(1, 0) - communityLevelFromTally(0, 0);
+    const tenth =
+      communityLevelFromTally(10, 0) - communityLevelFromTally(9, 0);
+    expect(first).toBeGreaterThan(tenth);
+  });
+
+  it("能到达梁祖 30 级（不会被锁死在中间）", () => {
+    expect(communityLevelFromTally(100, 0)).toBe(30);
+    expect(communityLevelFromTally(1000, 0)).toBe(30);
+  });
+
+  it("能到达小难梁 0 级", () => {
+    expect(communityLevelFromTally(0, 100)).toBe(0);
+  });
+
+  it("单票影响力随票数增加而递减，满级后归零", () => {
+    const early = singleVoteImpact(0, 0);
+    const late = singleVoteImpact(80, 0);
+    expect(early).toBeGreaterThan(late);
+    expect(singleVoteImpact(200, 0)).toBe(0);
   });
 });

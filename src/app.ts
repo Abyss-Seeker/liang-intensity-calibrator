@@ -3,9 +3,10 @@ import {
   communityLevelFromTally,
   getProgression,
   MAX_LEVEL,
+  singleVoteImpact,
   STAGES,
 } from "./progression";
-import type { VoteDirection } from "./vote";
+import type { HistoryEntry, VoteDirection } from "./vote";
 
 export interface AppController {
   readonly canvas: HTMLCanvasElement;
@@ -17,7 +18,9 @@ export interface AppController {
   setError(message: string): void;
   setVotes(up: number, down: number): void;
   setVoteState(state: VoteState, message?: string): void;
+  setHistory(history: HistoryEntry[]): void;
   onVote(handler: VoteHandler): void;
+  onShowCommunity(handler: () => void): void;
 }
 
 export type LevelChangeHandler = (level: number) => void;
@@ -36,6 +39,49 @@ function createStageMarkers(): string {
     (stage, index) =>
       `<li class="stage-marker" data-level="${index * 6}" style="--marker-index: ${index}">${stage}</li>`,
   ).join("");
+}
+
+const CHART_WIDTH = 600;
+const CHART_HEIGHT = 140;
+const CHART_PAD = { left: 10, right: 10, top: 10, bottom: 10 };
+
+function renderChart(svg: SVGSVGElement, history: HistoryEntry[]): void {
+  const plotW = CHART_WIDTH - CHART_PAD.left - CHART_PAD.right;
+  const plotH = CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom;
+  const parts: string[] = [];
+
+  for (let stage = 0; stage <= 5; stage++) {
+    const level = stage * 6;
+    const y = CHART_PAD.top + plotH - (level / MAX_LEVEL) * plotH;
+    parts.push(
+      `<line x1="${CHART_PAD.left}" y1="${y.toFixed(1)}" x2="${
+        CHART_WIDTH - CHART_PAD.right
+      }" y2="${y.toFixed(1)}" class="chart-stage-line" data-stage="${stage}" />`,
+    );
+  }
+
+  if (history.length > 0) {
+    const tMin = history[0].t;
+    const tMax = history[history.length - 1].t;
+    const tRange = Math.max(1, tMax - tMin);
+    const points = history.map((entry) => {
+      const level = communityLevelFromTally(entry.up, entry.down);
+      const x = CHART_PAD.left + ((entry.t - tMin) / tRange) * plotW;
+      const y = CHART_PAD.top + plotH - (level / MAX_LEVEL) * plotH;
+      return { x, y };
+    });
+    const polylinePoints = points
+      .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      .join(" ");
+    parts.push(`<polyline class="chart-line" points="${polylinePoints}" />`);
+
+    const last = points[points.length - 1];
+    parts.push(
+      `<circle class="chart-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3.5" />`,
+    );
+  }
+
+  svg.innerHTML = parts.join("");
 }
 
 export function mountApp(
@@ -100,6 +146,11 @@ export function mountApp(
           <span class="vote-title">社区梁系裁决</span>
           <span class="vote-state" role="status" data-state="idle">未投票</span>
         </div>
+
+        <div class="vote-chart">
+          <svg class="vote-chart-svg" viewBox="0 0 600 140" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
+        </div>
+
         <div class="vote-actions">
           <button class="vote-btn vote-btn--down" type="button" data-direction="down">
             <span class="vote-arrow" aria-hidden="true">▼</span>
@@ -112,9 +163,19 @@ export function mountApp(
             <span class="vote-count" data-count="up">0</span>
           </button>
         </div>
-        <p class="vote-community">
-          社区评定：<strong class="vote-community-level">—</strong>
-        </p>
+
+        <div class="vote-meta">
+          <p class="vote-community">
+            社区评定：<strong class="vote-community-level">—</strong>
+          </p>
+          <p class="vote-impact">
+            单票影响力 <strong class="vote-impact-value">—</strong>
+          </p>
+        </div>
+
+        <button class="vote-show-community" type="button" data-action="show-community">
+          查看社区评价
+        </button>
       </section>
 
       <footer class="footer-note">
@@ -139,11 +200,16 @@ export function mountApp(
   const voteCommunityLevel = root.querySelector<HTMLElement>(
     ".vote-community-level",
   )!;
+  const voteImpactValue = root.querySelector<HTMLElement>(".vote-impact-value")!;
+  const chartSvg = root.querySelector<SVGSVGElement>(".vote-chart-svg")!;
   const upCount = root.querySelector<HTMLElement>('[data-count="up"]')!;
   const downCount = root.querySelector<HTMLElement>('[data-count="down"]')!;
   const voteButtons = Array.from(
     root.querySelectorAll<HTMLButtonElement>(".vote-btn"),
   );
+  const showCommunityButton = root.querySelector<HTMLButtonElement>(
+    '[data-action="show-community"]',
+  )!;
 
   let currentPosition = 0;
 
@@ -182,6 +248,14 @@ export function mountApp(
     const level = communityLevelFromTally(up, down);
     const state = getProgression(level);
     voteCommunityLevel.textContent = `${state.stage} · ${state.level} 级`;
+
+    const impact = singleVoteImpact(up, down);
+    voteImpactValue.textContent =
+      impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(1)} 级`;
+  };
+
+  const setHistory = (history: HistoryEntry[]): void => {
+    renderChart(chartSvg, history);
   };
 
   const setVoteState = (state: VoteState, message?: string): void => {
@@ -206,6 +280,10 @@ export function mountApp(
     });
   };
 
+  const onShowCommunity = (handler: () => void): void => {
+    showCommunityButton.addEventListener("click", handler);
+  };
+
   slider.addEventListener("input", () => {
     setLevel(Number(slider.value));
   });
@@ -221,7 +299,9 @@ export function mountApp(
     setLevel,
     setVotes,
     setVoteState,
+    setHistory,
     onVote,
+    onShowCommunity,
     setLoading(loaded, total) {
       loadState.textContent = loaded >= total ? "连续祖力已就绪" : "载入连续祖力…";
     },

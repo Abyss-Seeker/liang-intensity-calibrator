@@ -31,25 +31,27 @@ function postVote(direction: string): Request {
 }
 
 describe("vote api", () => {
-  it("GET 返回初始 0 票", async () => {
+  it("GET 返回初始 0 票和空历史", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/vote"),
       env,
     );
-    expect(await response.json()).toEqual({ up: 0, down: 0 });
+    expect(await response.json()).toEqual({ up: 0, down: 0, history: [] });
   });
 
-  it("POST up 增加 up 票并标记已投票", async () => {
+  it("POST up 增加 up 票并记录历史", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("up"), env);
     const data = await response.json();
     expect(data.up).toBe(1);
     expect(data.down).toBe(0);
     expect(data.voted).toBe(true);
+    expect(data.history).toHaveLength(1);
+    expect(data.history[0].up).toBe(1);
   });
 
-  it("同 IP 重复投票被拒绝", async () => {
+  it("同 IP 一天内重复投票被拒绝", async () => {
     const { env } = makeEnv();
     await worker.fetch(postVote("up"), env);
     const response = await worker.fetch(postVote("down"), env);
