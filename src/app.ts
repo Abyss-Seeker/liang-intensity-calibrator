@@ -55,11 +55,15 @@ const RANGES: Record<RangeKey, number | null> = {
   all: null,
 };
 
-const CHART_W = 600;
-const CHART_H = 200;
-const CHART_PAD = { top: 14, right: 12, bottom: 22, left: 32 };
+// 图表内边距（像素）
+const CHART_PAD = { top: 14, right: 12, bottom: 22, left: 34 };
 
-function formatTime(t: number, rangeKey: RangeKey): string {
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// x 轴刻度标签
+function formatTick(t: number, rangeKey: RangeKey): string {
   const d = new Date(t);
   if (rangeKey === "1y" || rangeKey === "all") {
     return `${String(d.getFullYear()).slice(2)}/${d.getMonth() + 1}/${d.getDate()}`;
@@ -67,52 +71,84 @@ function formatTime(t: number, rangeKey: RangeKey): string {
   if (rangeKey === "7d" || rangeKey === "30d") {
     return `${d.getMonth() + 1}/${d.getDate()}`;
   }
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+// tooltip 里的完整时间
+function formatFullTime(t: number, rangeKey: RangeKey): string {
+  const d = new Date(t);
+  if (rangeKey === "tick") {
+    return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  if (rangeKey === "1y" || rangeKey === "all") {
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+interface ChartPoint {
+  x: number;
+  y: number;
+  t: number;
+  idx: number;
+  level: number;
+}
+
+function measure(svg: SVGSVGElement): { w: number; h: number } {
+  const w = svg.clientWidth;
+  const h = svg.clientHeight;
+  if (w > 0 && h > 0) return { w, h };
+  const rect = svg.getBoundingClientRect();
+  return { w: rect.width || 600, h: rect.height || 200 };
 }
 
 function renderChart(
   svg: SVGSVGElement,
   events: VoteEvent[],
   rangeKey: RangeKey,
-): void {
+): ChartPoint[] {
   const series = levelSeries(events);
   const now = Date.now();
 
-  // 决定 x 轴映射：tick 视图按票序，其余按时间。
-  let points: { x: number; y: number }[];
+  // 逻辑坐标（x 用时间戳或票序号）
+  let logical: { x: number; y: number; t: number; idx: number }[];
   let from: number;
   let to: number;
   let tickLabels: string[];
 
   if (rangeKey === "tick") {
-    // 每票视图：x = 票序号，y = 该票投出后的等级
-    points = series.map((p, i) => ({ x: i, y: p.level }));
+    logical = series.map((p, i) => ({ x: i, y: p.level, t: p.t, idx: i }));
     from = 0;
     to = Math.max(0, series.length - 1);
     tickLabels = Array.from({ length: 5 }, (_, i) => {
-      const idx = Math.round((from + ((to - from) * i) / 4));
+      const idx = Math.round(from + ((to - from) * i) / 4);
       return `#${idx + 1}`;
     });
   } else {
     const rangeMs = RANGES[rangeKey]!;
-    const visible = rangeKey === "all"
-      ? series
-      : series.filter((p) => p.t >= now - rangeMs);
-    points = visible.map((p) => ({ x: p.t, y: p.level }));
-    from = rangeKey === "all"
-      ? (series.length ? series[0].t : now)
-      : now - rangeMs;
+    const visible =
+      rangeKey === "all" ? series : series.filter((p) => p.t >= now - rangeMs);
+    logical = visible.map((p, i) => ({ x: p.t, y: p.level, t: p.t, idx: i }));
+    from =
+      rangeKey === "all"
+        ? series.length
+          ? series[0].t
+          : now
+        : now - rangeMs;
     to = now;
     tickLabels = Array.from({ length: 5 }, (_, i) => {
       const t = from + ((to - from) * i) / 4;
-      return formatTime(t, rangeKey);
+      return formatTick(t, rangeKey);
     });
   }
 
-  const plotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
-  const plotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
+  const { w, h } = measure(svg);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
-  const levels = points.map((p) => p.y);
+  const plotW = w - CHART_PAD.left - CHART_PAD.right;
+  const plotH = h - CHART_PAD.top - CHART_PAD.bottom;
+
+  const levels = logical.map((p) => p.y);
   const minL = levels.length ? Math.min(...levels) : 15;
   const maxL = levels.length ? Math.max(...levels) : 15;
   const yMin = Math.max(0, Math.floor(minL - 1));
@@ -122,15 +158,17 @@ function renderChart(
   const xSpan = Math.max(1, to - from);
   const xOf = (x: number): number =>
     CHART_PAD.left + ((x - from) / xSpan) * plotW;
+  const yOf = (level: number): number =>
+    CHART_PAD.top + plotH - ((level - yMin) / yRange) * plotH;
 
   const parts: string[] = [];
 
   for (let i = 0; i <= 4; i++) {
     const level = yMin + (yRange * i) / 4;
-    const y = CHART_PAD.top + plotH - ((level - yMin) / yRange) * plotH;
+    const y = yOf(level);
     parts.push(
       `<line class="chart-grid" x1="${CHART_PAD.left}" y1="${y.toFixed(1)}" x2="${
-        CHART_W - CHART_PAD.right
+        w - CHART_PAD.right
       }" y2="${y.toFixed(1)}" />`,
     );
     parts.push(
@@ -145,31 +183,40 @@ function renderChart(
     parts.push(
       `<line class="chart-grid" x1="${x.toFixed(1)}" y1="${CHART_PAD.top}" x2="${x.toFixed(
         1,
-      )}" y2="${CHART_H - CHART_PAD.bottom}" />`,
+      )}" y2="${h - CHART_PAD.bottom}" />`,
     );
     parts.push(
       `<text class="chart-tick" x="${x.toFixed(1)}" y="${
-        CHART_H - 8
+        h - 8
       }" text-anchor="middle">${tickLabels[i]}</text>`,
     );
   }
 
+  const points: ChartPoint[] = logical.map((p) => ({
+    x: xOf(p.x),
+    y: yOf(p.y),
+    t: p.t,
+    idx: p.idx,
+    level: p.y,
+  }));
+
   if (points.length > 0) {
-    const poly = points
-      .map((p) => `${xOf(p.x).toFixed(1)},${(
-        CHART_PAD.top + plotH - ((p.y - yMin) / yRange) * plotH
-      ).toFixed(1)}`)
-      .join(" ");
+    const poly = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
     parts.push(`<polyline class="chart-line" points="${poly}" />`);
     const last = points[points.length - 1];
-    const lastX = xOf(last.x);
-    const lastY = CHART_PAD.top + plotH - ((last.y - yMin) / yRange) * plotH;
     parts.push(
-      `<circle class="chart-dot" cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" />`,
+      `<circle class="chart-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3" />`,
     );
   }
 
+  // hover 竖线（跟随鼠标）
+  parts.push(`<line class="chart-hover-line" x1="0" y1="${CHART_PAD.top}" x2="0" y2="${
+    h - CHART_PAD.bottom
+  }" />`);
+  parts.push(`<circle class="chart-hover-dot" cx="0" cy="0" r="3.5" />`);
+
   svg.innerHTML = parts.join("");
+  return points;
 }
 
 export function mountApp(
@@ -262,7 +309,13 @@ export function mountApp(
               <button type="button" data-range="all">全部</button>
             </div>
           </div>
-          <svg class="vote-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
+          <div class="chart-body">
+            <svg class="vote-chart-svg" role="img" aria-label="评级历史走势"></svg>
+            <div class="chart-tooltip" role="status" hidden>
+              <span class="chart-tooltip-time"></span>
+              <span class="chart-tooltip-level"></span>
+            </div>
+          </div>
         </div>
 
         <div class="vote-meta">
@@ -308,6 +361,9 @@ export function mountApp(
   const voteImpactValue = root.querySelector<HTMLElement>(".vote-impact-value")!;
   const chartCurrent = root.querySelector<HTMLElement>(".chart-current")!;
   const chartSvg = root.querySelector<SVGSVGElement>(".vote-chart-svg")!;
+  const chartTooltip = root.querySelector<HTMLElement>(".chart-tooltip")!;
+  const chartTooltipTime = root.querySelector<HTMLElement>(".chart-tooltip-time")!;
+  const chartTooltipLevel = root.querySelector<HTMLElement>(".chart-tooltip-level")!;
   const rangeButtons = Array.from(
     root.querySelectorAll<HTMLButtonElement>(".chart-ranges button"),
   );
@@ -323,6 +379,7 @@ export function mountApp(
   let currentPosition = 0;
   let currentEvents: VoteEvent[] = [];
   let currentRange: RangeKey = "24h";
+  let chartPoints: ChartPoint[] = [];
 
   const setLevel = (rawLevel: number): void => {
     const position = clampPosition(rawLevel);
@@ -357,6 +414,10 @@ export function mountApp(
     onLevelChange(position);
   };
 
+  const redrawChart = (): void => {
+    chartPoints = renderChart(chartSvg, currentEvents, currentRange);
+  };
+
   const setVotes = (up: number, down: number, net: number): void => {
     upCount.textContent = String(up);
     downCount.textContent = String(down);
@@ -372,7 +433,7 @@ export function mountApp(
 
   const setEvents = (events: VoteEvent[]): void => {
     currentEvents = events;
-    renderChart(chartSvg, currentEvents, currentRange);
+    redrawChart();
   };
 
   const setVoteState = (state: VoteState, message?: string): void => {
@@ -405,13 +466,85 @@ export function mountApp(
     button.addEventListener("click", () => {
       currentRange = button.dataset.range as RangeKey;
       rangeButtons.forEach((b) => b.classList.toggle("is-active", b === button));
-      renderChart(chartSvg, currentEvents, currentRange);
+      redrawChart();
     });
   });
 
   slider.addEventListener("input", () => {
     setLevel(Number(slider.value));
   });
+
+  // hover：悬浮显示该时间片的完整时间与梁系强度
+  const hideTooltip = (): void => {
+    chartTooltip.hidden = true;
+    const line = chartSvg.querySelector<SVGLineElement>(".chart-hover-line");
+    const dot = chartSvg.querySelector<SVGCircleElement>(".chart-hover-dot");
+    if (line) line.style.display = "none";
+    if (dot) dot.style.display = "none";
+  };
+
+  chartSvg.addEventListener("mousemove", (event) => {
+    if (chartPoints.length === 0) return;
+    const rect = chartSvg.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
+
+    // 找 x 最近的采样点
+    let best = chartPoints[0];
+    let bestDist = Infinity;
+    for (const p of chartPoints) {
+      const d = Math.abs(p.x - px);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+    // 距离太远（比如空白区域）则隐藏
+    if (bestDist > 60) {
+      hideTooltip();
+      return;
+    }
+
+    const line = chartSvg.querySelector<SVGLineElement>(".chart-hover-line");
+    const dot = chartSvg.querySelector<SVGCircleElement>(".chart-hover-dot");
+    if (line) {
+      line.style.display = "";
+      line.setAttribute("x1", String(best.x));
+      line.setAttribute("x2", String(best.x));
+    }
+    if (dot) {
+      dot.style.display = "";
+      dot.setAttribute("cx", String(best.x));
+      dot.setAttribute("cy", String(best.y));
+    }
+
+    const state = getProgression(best.level);
+    chartTooltipTime.textContent = currentRange === "tick"
+      ? `第 ${best.idx + 1} 票 · ${formatFullTime(best.t, currentRange)}`
+      : formatFullTime(best.t, currentRange);
+    chartTooltipLevel.textContent = `${state.stage} · ${state.level} 级`;
+
+    chartTooltip.hidden = false;
+    // 定位 tooltip（相对 chart-body），跟随点、避免溢出
+    const body = chartTooltip.parentElement!;
+    const bodyRect = body.getBoundingClientRect();
+    const tipW = chartTooltip.offsetWidth || 140;
+    const tipH = chartTooltip.offsetHeight || 44;
+    let left = best.x + 12;
+    let top = best.y - tipH - 8;
+    if (left + tipW > bodyRect.width - 4) left = best.x - tipW - 12;
+    if (top < 4) top = best.y + 12;
+    chartTooltip.style.left = `${left}px`;
+    chartTooltip.style.top = `${top}px`;
+  });
+
+  chartSvg.addEventListener("mouseleave", hideTooltip);
+
+  // 窗口尺寸变化时重绘（保持文字不拉伸）
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => redrawChart());
+    observer.observe(chartSvg);
+  }
 
   setLevel(0);
 
