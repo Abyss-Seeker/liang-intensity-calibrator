@@ -4,7 +4,9 @@ import {
   clampPosition,
   communityLevelFromTally,
   getProgression,
+  levelSeries,
   singleVoteImpact,
+  voteWeight,
 } from "./progression";
 
 describe("getProgression", () => {
@@ -81,5 +83,37 @@ describe("communityLevelFromTally", () => {
     const late = singleVoteImpact(15);
     expect(early).toBeGreaterThan(late);
     expect(singleVoteImpact(30)).toBe(0);
+  });
+});
+
+describe("voteWeight", () => {
+  it("age 为 0 时权重为 1", () => {
+    expect(voteWeight(0)).toBe(1);
+  });
+
+  it("一个半衰期后权重约 0.5", () => {
+    expect(voteWeight(7 * 24 * 3600 * 1000)).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe("levelSeries", () => {
+  it("空事件流返回空序列", () => {
+    expect(levelSeries([])).toEqual([]);
+  });
+
+  it("按时间排序累计净票，返回每个时间点的等级", () => {
+    const now = Date.now();
+    const series = levelSeries([
+      { t: now + 1000, d: "up" as const },
+      { t: now, d: "up" as const },
+      { t: now + 2000, d: "down" as const },
+    ]);
+    expect(series).toHaveLength(3);
+    // 第一票 up → 等级升高
+    expect(series[0].level).toBeGreaterThan(15);
+    // 第二票 up → 更高
+    expect(series[1].level).toBeGreaterThan(series[0].level);
+    // 第三票 down → 回落
+    expect(series[2].level).toBeLessThan(series[1].level);
   });
 });

@@ -16,17 +16,17 @@ interface Env {
   VOTES: KVNamespace;
 }
 
-interface HistoryEntry {
+interface VoteEvent {
   t: number;
-  level: number;
+  d: "up" | "down";
 }
 
 const BASE_LEVEL = 15;
 const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
-const WINDOW_DAYS = 30; // 只统计最近 30 天
-const HALF_LIFE_DAYS = 7; // 指数半衰期 7 天，久远的票影响力淡化
-const HISTORY_KEY = "history";
-const HISTORY_MAX_ENTRIES = 500;
+const HALF_LIFE_MS = 7 * 24 * 3600 * 1000; // 指数半衰期 7 天
+const WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
+const EVENTS_KEY = "events";
+const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
 const VOTE_TTL_SECONDS = 24 * 60 * 60;
 
 function json(data: unknown, status = 200): Response {
@@ -37,11 +37,6 @@ function json(data: unknown, status = 200): Response {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function dayKey(offsetDays: number): string {
-  const d = new Date(Date.now() - offsetDays * 86400000);
-  return `d:${d.toISOString().slice(0, 10)}`;
 }
 
 function levelFromNet(net: number): number {
@@ -56,53 +51,65 @@ function levelFromNet(net: number): number {
   );
 }
 
-async function readTally(
-  env: Env,
-): Promise<{ up: number; down: number; net: number; level: number }> {
-  let weightedUp = 0;
-  let weightedDown = 0;
-  let totalUp = 0;
-  let totalDown = 0;
-  for (let i = 0; i < WINDOW_DAYS; i++) {
-    const raw = await env.VOTES.get(dayKey(i));
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as { up?: number; down?: number };
-      const up = parsed.up ?? 0;
-      const down = parsed.down ?? 0;
-      const weight = Math.pow(0.5, i / HALF_LIFE_DAYS);
-      weightedUp += up * weight;
-      weightedDown += down * weight;
-      totalUp += up;
-      totalDown += down;
-    } catch {
-      // 忽略损坏数据
-    }
-  }
-  const net = weightedUp - weightedDown;
-  return { up: totalUp, down: totalDown, net, level: levelFromNet(net) };
-}
-
-async function readHistory(env: Env): Promise<HistoryEntry[]> {
-  const raw = await env.VOTES.get(HISTORY_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
+// 单票在 age 毫秒前的权重（指数半衰期）
+function voteWeight(ageMs: number): number {
+  return Math.pow(0.5, ageMs / HALF_LIFE_MS);
 }
 
 function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "unknown";
 }
 
+async function readEvents(env: Env): Promise<VoteEvent[]> {
+  const raw = await env.VOTES.get(EVENTS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as VoteEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 计算当前加权净票（时间衰减后），供等级映射使用。
+function computeTally(events: VoteEvent[], now: number) {
+  let up = 0;
+  let down = 0;
+  let weightedNet = 0;
+  for (const e of events) {
+    const age = now - e.t;
+    if (age < 0 || age > WINDOW_MS) continue;
+    const w = voteWeight(age);
+    if (e.d === "up") {
+      up += 1;
+      weightedNet += w;
+    } else {
+      down += 1;
+      weightedNet -= w;
+    }
+  }
+  return {
+    up,
+    down,
+    net: weightedNet,
+    level: levelFromNet(weightedNet),
+  };
+}
+
 async function handleVote(request: Request, env: Env): Promise<Response> {
+  const ip = clientIp(request);
+  const votedKey = `voted:${ip}`;
+  const alreadyVoted = await env.VOTES.get(votedKey);
+
   if (request.method === "GET") {
-    const tally = await readTally(env);
-    const history = await readHistory(env);
-    return json({ ...tally, history });
+    const events = await readEvents(env);
+    const tally = computeTally(events, Date.now());
+    return json({
+      ...tally,
+      events,
+      voted: Boolean(alreadyVoted),
+      votedDirection: alreadyVoted ?? null,
+    });
   }
 
   if (request.method !== "POST") {
@@ -121,44 +128,26 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     return json({ reason: "方向必须是 up 或 down" }, 400);
   }
 
-  const ip = clientIp(request);
-  const votedKey = `voted:${ip}`;
-  const alreadyVoted = await env.VOTES.get(votedKey);
   if (alreadyVoted) {
-    const tally = await readTally(env);
+    const events = await readEvents(env);
+    const tally = computeTally(events, Date.now());
     return json({
       ...tally,
-      history: await readHistory(env),
-      voted: false,
+      events,
+      voted: true,
+      votedDirection: alreadyVoted,
       reason: "今天已经投过票了，明天再来吧",
     });
   }
 
-  const todayKey = dayKey(0);
-  const raw = await env.VOTES.get(todayKey);
-  let up = 0;
-  let down = 0;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as { up?: number; down?: number };
-      up = parsed.up ?? 0;
-      down = parsed.down ?? 0;
-    } catch {
-      // 忽略损坏数据
-    }
-  }
-  if (direction === "up") up += 1;
-  else down += 1;
-  await env.VOTES.put(todayKey, JSON.stringify({ up, down }));
+  const events = await readEvents(env);
+  events.push({ t: Date.now(), d: direction });
+  const trimmed = events.slice(-EVENTS_MAX);
+  await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
   await env.VOTES.put(votedKey, direction, { expirationTtl: VOTE_TTL_SECONDS });
 
-  const tally = await readTally(env);
-  const history = await readHistory(env);
-  history.push({ t: Date.now(), level: tally.level });
-  const trimmed = history.slice(-HISTORY_MAX_ENTRIES);
-  await env.VOTES.put(HISTORY_KEY, JSON.stringify(trimmed));
-
-  return json({ ...tally, voted: true, history: trimmed });
+  const tally = computeTally(trimmed, Date.now());
+  return json({ ...tally, events: trimmed, voted: true, votedDirection: direction });
 }
 
 export default {

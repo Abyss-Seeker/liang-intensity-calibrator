@@ -8,8 +8,8 @@ import {
 import {
   castVote,
   fetchVotes,
-  type HistoryEntry,
   type VoteDirection,
+  type VoteEvent,
 } from "./vote";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -33,11 +33,11 @@ const applyTally = (
   down: number,
   net: number,
   level: number,
-  history: HistoryEntry[],
+  events: VoteEvent[],
 ): void => {
   communityLevel = level;
   controller?.setVotes(up, down, net);
-  controller?.setHistory(history);
+  controller?.setEvents(events);
 };
 
 const animateToLevel = (target: number): void => {
@@ -62,7 +62,16 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally.up, tally.down, tally.net, tally.level, tally.history);
+    applyTally(tally.up, tally.down, tally.net, tally.level, tally.events);
+    // 进入页面第一时间根据后端返回的 voted 状态设置提示文字
+    if (tally.voted) {
+      controller?.setVoteState(
+        "voted",
+        `已投票（${tally.votedDirection === "up" ? "往上" : "往下"}）`,
+      );
+    } else {
+      controller?.setVoteState("idle", "未投票");
+    }
     if (isFirstSync) {
       isFirstSync = false;
       controller?.setLevel(communityLevel);
@@ -81,14 +90,20 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.up, result.down, result.net, result.level, result.history);
-    animateToLevel(result.level);
-    controller?.setVoteState(
-      "voted",
-      result.voted === false
-        ? (result.reason ?? "今天已经投过票了")
-        : "投票成功",
-    );
+    applyTally(result.up, result.down, result.net, result.level, result.events);
+    if (result.reason) {
+      // 重复投票：保持已投票状态，不抢滑杆
+      controller?.setVoteState(
+        "voted",
+        `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
+      );
+    } else {
+      animateToLevel(result.level);
+      controller?.setVoteState(
+        "voted",
+        `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
+      );
+    }
   } catch {
     controller?.setVoteState("error", "投票失败，请重试");
   }

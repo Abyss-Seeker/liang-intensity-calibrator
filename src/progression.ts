@@ -66,3 +66,46 @@ export function singleVoteImpact(net: number): number {
   const next = net >= 0 ? levelFromNet(net + 1) : levelFromNet(net - 1);
   return Math.abs(next - current);
 }
+
+// —— 时间衰减（与 worker 端保持一致）——
+export const VOTE_HALF_LIFE_MS = 7 * 24 * 3600 * 1000; // 指数半衰期 7 天
+export const VOTE_WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
+
+// 单票在 age 毫秒前的权重（指数半衰期）
+export function voteWeight(ageMs: number): number {
+  return Math.pow(0.5, ageMs / VOTE_HALF_LIFE_MS);
+}
+
+export interface VoteEventPoint {
+  t: number;
+  d: "up" | "down";
+}
+
+// 事件流 → 走势序列：按时间排序，累计加权净票，返回每个时间点的等级。
+// 用滑动窗口（30 天）逐点推进，均摊 O(n)。
+export function levelSeries(events: VoteEventPoint[]): { t: number; level: number }[] {
+  const sorted = [...events].sort((a, b) => a.t - b.t);
+  const points: { t: number; level: number }[] = [];
+  let net = 0;
+  let lastT = -1;
+  const active: { t: number; d: "up" | "down" }[] = [];
+  let head = 0;
+
+  for (const e of sorted) {
+    if (lastT >= 0 && e.t > lastT) {
+      // 所有活跃票统一随时间衰减
+      net *= voteWeight(e.t - lastT);
+    }
+    // 移除超出 30 天窗口的旧票
+    while (head < active.length && e.t - active[head].t > VOTE_WINDOW_MS) {
+      net -= (active[head].d === "up" ? 1 : -1) * voteWeight(e.t - active[head].t);
+      head += 1;
+    }
+    // 加入新票（age = 0，权重 = 1）
+    net += e.d === "up" ? 1 : -1;
+    active.push({ t: e.t, d: e.d });
+    lastT = e.t;
+    points.push({ t: e.t, level: levelFromNet(net) });
+  }
+  return points;
+}

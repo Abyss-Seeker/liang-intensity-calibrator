@@ -31,7 +31,7 @@ function postVote(direction: string): Request {
 }
 
 describe("vote api", () => {
-  it("GET 返回初始 0 票和中间等级", async () => {
+  it("GET 返回初始 0 票、中间等级和未投票状态", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/vote"),
@@ -42,19 +42,34 @@ describe("vote api", () => {
     expect(data.down).toBe(0);
     expect(data.net).toBe(0);
     expect(data.level).toBe(15);
-    expect(data.history).toEqual([]);
+    expect(data.events).toEqual([]);
+    expect(data.voted).toBe(false);
+    expect(data.votedDirection).toBe(null);
   });
 
-  it("POST up 增加 up 票并记录历史", async () => {
+  it("POST up 增加 up 票并记录事件流与已投票状态", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("up"), env);
     const data = await response.json();
     expect(data.up).toBe(1);
     expect(data.down).toBe(0);
     expect(data.voted).toBe(true);
+    expect(data.votedDirection).toBe("up");
     expect(data.level).toBeGreaterThan(15);
-    expect(data.history).toHaveLength(1);
-    expect(data.history[0].level).toBe(data.level);
+    expect(data.events).toHaveLength(1);
+    expect(data.events[0].d).toBe("up");
+  });
+
+  it("GET 能返回当前 IP 的已投票状态", async () => {
+    const { env } = makeEnv();
+    await worker.fetch(postVote("up"), env);
+    const response = await worker.fetch(
+      new Request("https://example.com/api/vote"),
+      env,
+    );
+    const data = await response.json();
+    expect(data.voted).toBe(true);
+    expect(data.votedDirection).toBe("up");
   });
 
   it("同 IP 一天内重复投票被拒绝", async () => {
@@ -62,7 +77,9 @@ describe("vote api", () => {
     await worker.fetch(postVote("up"), env);
     const response = await worker.fetch(postVote("down"), env);
     const data = await response.json();
-    expect(data.voted).toBe(false);
+    expect(data.voted).toBe(true);
+    expect(data.votedDirection).toBe("up");
+    expect(data.reason).toContain("已经投过");
     expect(data.up).toBe(1);
     expect(data.down).toBe(0);
   });

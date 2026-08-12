@@ -498,8 +498,9 @@ h1 {
 .footer-note {
   position: relative;
   z-index: 10;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
@@ -509,8 +510,17 @@ h1 {
   letter-spacing: 0.12em;
 }
 
+.footer-note > span:first-child {
+  justify-self: start;
+}
+
+.footer-note > span:last-child {
+  justify-self: end;
+}
+
 .footer-links {
   display: flex;
+  justify-self: center;
   gap: 14px;
 }
 
@@ -590,8 +600,9 @@ h1 {
   }
 
   .footer-note {
-    display: flex;
-    justify-content: center;
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: center;
   }
 
   .footer-note > span:not(.footer-links) {
@@ -678,7 +689,7 @@ h1 {
 }
 
 .vote-chart {
-  margin-bottom: 10px;
+  margin: 10px 0;
   border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, currentColor 4%, transparent);
@@ -704,6 +715,8 @@ h1 {
 
 .chart-ranges {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
 }
 

@@ -2,11 +2,12 @@ import {
   clampPosition,
   getProgression,
   levelFromNet,
+  levelSeries,
   MAX_LEVEL,
   singleVoteImpact,
   STAGES,
 } from "./progression";
-import type { HistoryEntry, VoteDirection } from "./vote";
+import type { VoteDirection, VoteEvent } from "./vote";
 
 export interface AppController {
   readonly canvas: HTMLCanvasElement;
@@ -18,7 +19,7 @@ export interface AppController {
   setError(message: string): void;
   setVotes(up: number, down: number, net: number): void;
   setVoteState(state: VoteState, message?: string): void;
-  setHistory(history: HistoryEntry[]): void;
+  setEvents(events: VoteEvent[]): void;
   onVote(handler: VoteHandler): void;
   onShowCommunity(handler: () => void): void;
 }
@@ -41,14 +42,17 @@ function createStageMarkers(): string {
   ).join("");
 }
 
-type RangeKey = "1h" | "6h" | "24h" | "7d" | "30d";
+type RangeKey = "tick" | "1h" | "6h" | "24h" | "7d" | "30d" | "1y" | "all";
 
-const RANGES: Record<RangeKey, number> = {
+const RANGES: Record<RangeKey, number | null> = {
+  tick: null,
   "1h": 3_600_000,
   "6h": 21_600_000,
   "24h": 86_400_000,
   "7d": 604_800_000,
   "30d": 2_592_000_000,
+  "1y": 31_536_000_000,
+  all: null,
 };
 
 const CHART_W = 600;
@@ -57,6 +61,9 @@ const CHART_PAD = { top: 14, right: 12, bottom: 22, left: 32 };
 
 function formatTime(t: number, rangeKey: RangeKey): string {
   const d = new Date(t);
+  if (rangeKey === "1y" || rangeKey === "all") {
+    return `${String(d.getFullYear()).slice(2)}/${d.getMonth() + 1}/${d.getDate()}`;
+  }
   if (rangeKey === "7d" || rangeKey === "30d") {
     return `${d.getMonth() + 1}/${d.getDate()}`;
   }
@@ -65,23 +72,56 @@ function formatTime(t: number, rangeKey: RangeKey): string {
 
 function renderChart(
   svg: SVGSVGElement,
-  history: HistoryEntry[],
+  events: VoteEvent[],
   rangeKey: RangeKey,
 ): void {
-  const rangeMs = RANGES[rangeKey];
+  const series = levelSeries(events);
   const now = Date.now();
-  const from = now - rangeMs;
-  const inRange = history.filter((h) => h.t >= from);
+
+  // 决定 x 轴映射：tick 视图按票序，其余按时间。
+  let points: { x: number; y: number }[];
+  let from: number;
+  let to: number;
+  let tickLabels: string[];
+
+  if (rangeKey === "tick") {
+    // 每票视图：x = 票序号，y = 该票投出后的等级
+    points = series.map((p, i) => ({ x: i, y: p.level }));
+    from = 0;
+    to = Math.max(0, series.length - 1);
+    tickLabels = Array.from({ length: 5 }, (_, i) => {
+      const idx = Math.round((from + ((to - from) * i) / 4));
+      return `#${idx + 1}`;
+    });
+  } else {
+    const rangeMs = RANGES[rangeKey]!;
+    const visible = rangeKey === "all"
+      ? series
+      : series.filter((p) => p.t >= now - rangeMs);
+    points = visible.map((p) => ({ x: p.t, y: p.level }));
+    from = rangeKey === "all"
+      ? (series.length ? series[0].t : now)
+      : now - rangeMs;
+    to = now;
+    tickLabels = Array.from({ length: 5 }, (_, i) => {
+      const t = from + ((to - from) * i) / 4;
+      return formatTime(t, rangeKey);
+    });
+  }
 
   const plotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
   const plotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
 
-  const levels = inRange.map((h) => h.level);
+  const levels = points.map((p) => p.y);
   const minL = levels.length ? Math.min(...levels) : 15;
   const maxL = levels.length ? Math.max(...levels) : 15;
   const yMin = Math.max(0, Math.floor(minL - 1));
   const yMax = Math.min(30, Math.ceil(maxL + 1));
   const yRange = Math.max(1, yMax - yMin);
+
+  const xSpan = Math.max(1, to - from);
+  const xOf = (x: number): number =>
+    CHART_PAD.left + ((x - from) / xSpan) * plotW;
 
   const parts: string[] = [];
 
@@ -101,7 +141,6 @@ function renderChart(
   }
 
   for (let i = 0; i <= 4; i++) {
-    const t = from + (rangeMs * i) / 4;
     const x = CHART_PAD.left + (plotW * i) / 4;
     parts.push(
       `<line class="chart-grid" x1="${x.toFixed(1)}" y1="${CHART_PAD.top}" x2="${x.toFixed(
@@ -111,20 +150,22 @@ function renderChart(
     parts.push(
       `<text class="chart-tick" x="${x.toFixed(1)}" y="${
         CHART_H - 8
-      }" text-anchor="middle">${formatTime(t, rangeKey)}</text>`,
+      }" text-anchor="middle">${tickLabels[i]}</text>`,
     );
   }
 
-  if (inRange.length > 0) {
-    const pts = inRange.map((h) => ({
-      x: CHART_PAD.left + ((h.t - from) / rangeMs) * plotW,
-      y: CHART_PAD.top + plotH - ((h.level - yMin) / yRange) * plotH,
-    }));
-    const poly = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  if (points.length > 0) {
+    const poly = points
+      .map((p) => `${xOf(p.x).toFixed(1)},${(
+        CHART_PAD.top + plotH - ((p.y - yMin) / yRange) * plotH
+      ).toFixed(1)}`)
+      .join(" ");
     parts.push(`<polyline class="chart-line" points="${poly}" />`);
-    const last = pts[pts.length - 1];
+    const last = points[points.length - 1];
+    const lastX = xOf(last.x);
+    const lastY = CHART_PAD.top + plotH - ((last.y - yMin) / yRange) * plotH;
     parts.push(
-      `<circle class="chart-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3" />`,
+      `<circle class="chart-dot" cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" />`,
     );
   }
 
@@ -191,21 +232,7 @@ export function mountApp(
       <section class="vote-panel" aria-label="社区梁系投票">
         <div class="vote-head">
           <span class="vote-title">社区梁系裁决</span>
-          <span class="vote-state" role="status" data-state="idle">未投票</span>
-        </div>
-
-        <div class="vote-chart">
-          <div class="chart-toolbar">
-            <span class="chart-current">—</span>
-            <div class="chart-ranges" role="group" aria-label="查看区间">
-              <button type="button" data-range="1h">1h</button>
-              <button type="button" data-range="6h">6h</button>
-              <button type="button" data-range="24h" class="is-active">24h</button>
-              <button type="button" data-range="7d">7d</button>
-              <button type="button" data-range="30d">30d</button>
-            </div>
-          </div>
-          <svg class="vote-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
+          <span class="vote-state" role="status" data-state="idle">检查中…</span>
         </div>
 
         <div class="vote-actions">
@@ -219,6 +246,23 @@ export function mountApp(
             <span class="vote-label">往上</span>
             <span class="vote-count" data-count="up">0</span>
           </button>
+        </div>
+
+        <div class="vote-chart">
+          <div class="chart-toolbar">
+            <span class="chart-current">—</span>
+            <div class="chart-ranges" role="group" aria-label="查看区间">
+              <button type="button" data-range="tick">每票</button>
+              <button type="button" data-range="1h">1h</button>
+              <button type="button" data-range="6h">6h</button>
+              <button type="button" data-range="24h" class="is-active">24h</button>
+              <button type="button" data-range="7d">7d</button>
+              <button type="button" data-range="30d">30d</button>
+              <button type="button" data-range="1y">1y</button>
+              <button type="button" data-range="all">全部</button>
+            </div>
+          </div>
+          <svg class="vote-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none" role="img" aria-label="评级历史走势"></svg>
         </div>
 
         <div class="vote-meta">
@@ -277,7 +321,7 @@ export function mountApp(
   )!;
 
   let currentPosition = 0;
-  let currentHistory: HistoryEntry[] = [];
+  let currentEvents: VoteEvent[] = [];
   let currentRange: RangeKey = "24h";
 
   const setLevel = (rawLevel: number): void => {
@@ -326,9 +370,9 @@ export function mountApp(
       impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(1)} 级`;
   };
 
-  const setHistory = (history: HistoryEntry[]): void => {
-    currentHistory = history;
-    renderChart(chartSvg, currentHistory, currentRange);
+  const setEvents = (events: VoteEvent[]): void => {
+    currentEvents = events;
+    renderChart(chartSvg, currentEvents, currentRange);
   };
 
   const setVoteState = (state: VoteState, message?: string): void => {
@@ -361,7 +405,7 @@ export function mountApp(
     button.addEventListener("click", () => {
       currentRange = button.dataset.range as RangeKey;
       rangeButtons.forEach((b) => b.classList.toggle("is-active", b === button));
-      renderChart(chartSvg, currentHistory, currentRange);
+      renderChart(chartSvg, currentEvents, currentRange);
     });
   });
 
@@ -380,7 +424,7 @@ export function mountApp(
     setLevel,
     setVotes,
     setVoteState,
-    setHistory,
+    setEvents,
     onVote,
     onShowCommunity,
     setLoading(loaded, total) {
