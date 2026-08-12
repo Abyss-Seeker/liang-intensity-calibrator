@@ -235,7 +235,9 @@ export function mountApp(
     const strength = position / MAX_LEVEL;
     experience.style.setProperty("--strength", String(strength));
     experience.style.setProperty("--strength-pct", `${strength * 100}%`);
-    const inkPct = Math.min(1, Math.max(0, (strength - 0.45) / 0.1));
+    // 阶跃式反色：文字要么纯深、要么纯浅，绝不取中间灰，
+    // 避免在中间档位文字颜色与背景重合。切换点 0.75 两侧对比度均 ≥3:1。
+    const inkPct = strength >= 0.75 ? 1 : 0;
     experience.style.setProperty("--ink-pct", `${inkPct * 100}%`);
     experience.style.setProperty("--stage-progress", String(state.localProgress));
 

@@ -524,6 +524,20 @@ h1 {
   color: var(--accent);
 }
 
+.eyebrow,
+.level-meter span,
+.stage-readout > span,
+.stage-marker,
+.drag-hint,
+.footer-note,
+.footer-links a,
+.vote-title,
+.vote-state,
+.vote-community,
+.vote-impact {
+  transition: color 300ms ease;
+}
+
 @media (max-width: 700px) {
   .experience {
     grid-template-rows: auto minmax(0, 1fr) auto;
