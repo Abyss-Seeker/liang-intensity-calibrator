@@ -40,11 +40,12 @@ label {
 .experience {
   --strength: 0;
   --stage-progress: 0;
-  --ink: #171816;
-  --muted: #70746f;
+  --strength-pct: 0%;
+  --ink: color-mix(in srgb, #171816, #f4f1e8 var(--strength-pct));
+  --muted: color-mix(in srgb, #70746f, #b8b4a9 var(--strength-pct));
   --accent: #b52b24;
   --gold: #c19a49;
-  --thumb-bg: #e8e9e5;
+  --thumb-bg: color-mix(in srgb, #e8e9e5, #1a1715 var(--strength-pct));
   position: relative;
   isolation: isolate;
   display: grid;
@@ -83,13 +84,6 @@ label {
   background-size: auto, 7px 7px;
   mix-blend-mode: soft-light;
   opacity: 0.28;
-}
-
-.experience[data-stage="4"],
-.experience[data-stage="5"] {
-  --ink: #f4f1e8;
-  --muted: #b8b4a9;
-  --thumb-bg: #1a1715;
 }
 
 .experience[data-stage="5"] {

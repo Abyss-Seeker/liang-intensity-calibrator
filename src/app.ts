@@ -233,6 +233,10 @@ export function mountApp(
     canvas.setAttribute("aria-label", `当前形态：${state.stage}`);
     experience.dataset.stage = String(state.stageIndex);
     experience.style.setProperty("--strength", String(position / MAX_LEVEL));
+    experience.style.setProperty(
+      "--strength-pct",
+      `${(position / MAX_LEVEL) * 100}%`,
+    );
     experience.style.setProperty("--stage-progress", String(state.localProgress));
 
     ticks.forEach((tick, index) => {
