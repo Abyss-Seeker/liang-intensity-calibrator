@@ -630,6 +630,30 @@ h1 {
   }
 }
 
+.app-browser-hint {
+  position: fixed;
+  z-index: 100;
+  top: 12px;
+  left: 50%;
+  max-width: min(90vw, 420px);
+  padding: 10px 16px;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 10px;
+  color: #f4f1e8;
+  background: rgb(23 24 22 / 92%);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+  text-align: center;
+  transform: translateX(-50%);
+  transition: opacity 500ms ease;
+}
+
+.app-browser-hint.is-fading {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

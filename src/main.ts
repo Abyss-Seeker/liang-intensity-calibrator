@@ -21,7 +21,6 @@ if (!app) {
 let controller: AppController | null = null;
 let renderer: EvolutionVideoRenderer | null = null;
 let communityLevel = 15;
-let isFirstSync = true;
 let animFrame = 0;
 
 const requestDraw = (level: number): void => {
@@ -63,7 +62,6 @@ const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
     applyTally(tally.up, tally.down, tally.net, tally.level, tally.events);
-    // 进入页面第一时间根据后端返回的 voted 状态设置提示文字
     if (tally.voted) {
       controller?.setVoteState(
         "voted",
@@ -72,15 +70,29 @@ const syncVotes = async (): Promise<void> => {
     } else {
       controller?.setVoteState("idle", "未投票");
     }
-    if (isFirstSync) {
-      isFirstSync = false;
-      controller?.setLevel(communityLevel);
-      requestDraw(communityLevel);
-    }
   } catch {
     controller?.setVoteState("error", "社区票数加载失败");
   }
 };
+
+// 检测是否在内置浏览器（微信/QQ/支付宝/微博等 WebView）
+function isInAppBrowser(): boolean {
+  const ua = navigator.userAgent || "";
+  return /MicroMessenger/i.test(ua) || /WeiBo/i.test(ua) || /QQ\//i.test(ua) || /AlipayClient/i.test(ua);
+}
+
+function showInAppBrowserHint(): void {
+  const hint = document.createElement("div");
+  hint.className = "app-browser-hint";
+  hint.setAttribute("role", "status");
+  hint.textContent = "内置浏览器加载较慢，建议点右上角「···」→ 在默认浏览器中打开";
+  document.body.appendChild(hint);
+  // 8 秒后自动淡出
+  window.setTimeout(() => {
+    hint.classList.add("is-fading");
+    window.setTimeout(() => hint.remove(), 500);
+  }, 8000);
+}
 
 controller = mountApp(app, requestDraw);
 renderer = createEvolutionVideoRenderer(controller.canvas);
@@ -92,7 +104,6 @@ controller.onVote(async (direction: VoteDirection) => {
     const result = await castVote(direction);
     applyTally(result.up, result.down, result.net, result.level, result.events);
     if (result.reason) {
-      // 重复投票：保持已投票状态，不抢滑杆
       controller?.setVoteState(
         "voted",
         `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
@@ -113,18 +124,26 @@ controller.onShowCommunity(() => {
   animateToLevel(communityLevel);
 });
 
-renderer
-  .load()
+// 视频加载 与 社区票数请求 并行，缩短首屏时间（原先串行：等视频 loadeddata 后才请求票数）。
+const videoReady = renderer.load();
+const votesReady = syncVotes();
+
+Promise.all([videoReady, votesReady])
   .then(() => {
-    // 视频加载完成后再读社区票数，两者都就绪才隐藏加载层，
-    // 避免首屏卡在小难梁第一帧。
-    void syncVotes().finally(() => {
+    // 两者都就绪后，渲染社区等级对应的帧；等目标帧真正画出来再撤掉加载层，
+    // 避免出现"分数/样式都到位但图片卡在第一帧"的情况。
+    controller?.setLevel(communityLevel);
+    renderer?.render(communityLevel, () => {
       controller?.setReady();
     });
   })
   .catch(() => {
     controller?.setError("图像加载失败，请刷新重试");
   });
+
+if (isInAppBrowser()) {
+  showInAppBrowserHint();
+}
 
 window.addEventListener("resize", () => {
   renderer?.redraw();
