@@ -232,11 +232,11 @@ export function mountApp(
     stageIndex.textContent = `阶段 ${String(state.stageIndex + 1).padStart(2, "0")} / 06`;
     canvas.setAttribute("aria-label", `当前形态：${state.stage}`);
     experience.dataset.stage = String(state.stageIndex);
-    experience.style.setProperty("--strength", String(position / MAX_LEVEL));
-    experience.style.setProperty(
-      "--strength-pct",
-      `${(position / MAX_LEVEL) * 100}%`,
-    );
+    const strength = position / MAX_LEVEL;
+    experience.style.setProperty("--strength", String(strength));
+    experience.style.setProperty("--strength-pct", `${strength * 100}%`);
+    const inkPct = Math.min(1, Math.max(0, (strength - 0.45) / 0.1));
+    experience.style.setProperty("--ink-pct", `${inkPct * 100}%`);
     experience.style.setProperty("--stage-progress", String(state.localProgress));
 
     ticks.forEach((tick, index) => {
