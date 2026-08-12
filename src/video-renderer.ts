@@ -55,7 +55,6 @@ export function createEvolutionVideoRenderer(
   canvas.after(video);
 
   let requestedTime = 0;
-  let seekFrame = 0;
 
   const drawNow = (): void => {
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
@@ -81,7 +80,30 @@ export function createEvolutionVideoRenderer(
     }
   };
 
-  video.addEventListener("seeked", drawDecodedFrame);
+  // 串行化 seek：拖动很快时，视频一次只处理一个 seek，
+  // 中间位置被合并，等当前 seek 完成后再追到最新目标，
+  // 避免 seek 队列堆积造成的卡顿和跳帧。
+  const seekToRequestedTime = (): void => {
+    if (video.seeking) {
+      return;
+    }
+    if (!Number.isFinite(requestedTime) || video.readyState < 1) {
+      return;
+    }
+
+    const lastFrameTime = Math.max(0, video.duration - 1 / VIDEO_FPS);
+    const target = Math.min(requestedTime, lastFrameTime);
+    if (Math.abs(video.currentTime - target) < 0.001) {
+      drawNow();
+      return;
+    }
+    video.currentTime = target;
+  };
+
+  video.addEventListener("seeked", () => {
+    drawDecodedFrame();
+    seekToRequestedTime();
+  });
 
   const render = (position: number): void => {
     const clampedPosition = clampPosition(position);
@@ -89,16 +111,7 @@ export function createEvolutionVideoRenderer(
     canvas.dataset.frame = String(
       Math.round(clampedPosition * INTERPOLATION_FACTOR),
     ).padStart(3, "0");
-
-    cancelAnimationFrame(seekFrame);
-    seekFrame = requestAnimationFrame(() => {
-      if (!Number.isFinite(requestedTime) || video.readyState < 1) {
-        return;
-      }
-
-      const lastFrameTime = Math.max(0, video.duration - 1 / VIDEO_FPS);
-      video.currentTime = Math.min(requestedTime, lastFrameTime);
-    });
+    seekToRequestedTime();
   };
 
   return {

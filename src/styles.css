@@ -514,6 +514,21 @@ h1 {
   letter-spacing: 0.12em;
 }
 
+.footer-links {
+  display: flex;
+  gap: 14px;
+}
+
+.footer-links a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.footer-links a:hover {
+  color: var(--accent);
+}
+
 @media (max-width: 700px) {
   .experience {
     grid-template-rows: auto minmax(0, 1fr) auto;
@@ -566,6 +581,11 @@ h1 {
   }
 
   .footer-note {
+    display: flex;
+    justify-content: center;
+  }
+
+  .footer-note > span:not(.footer-links) {
     display: none;
   }
 }

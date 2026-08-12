@@ -180,6 +180,10 @@ export function mountApp(
 
       <footer class="footer-note">
         <span>31 级连续进化</span>
+        <span class="footer-links">
+          <a href="https://github.com/Lichtspektrum/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">原项目</a>
+          <a href="https://github.com/Abyss-Seeker/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">本项目</a>
+        </span>
         <span>正脸识别协议：已启用</span>
       </footer>
     </div>
