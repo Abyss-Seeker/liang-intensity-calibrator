@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="滑动变祖器图标">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4D6BFE"/>
+      <stop offset="1" stop-color="#3552D8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角方形背景（DeepSeek 蓝渐变） -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+
+  <!-- 滑轨（变阻器轨道） -->
+  <line x1="120" y1="366" x2="392" y2="366" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- 轨道两端端点 -->
+  <circle cx="120" cy="366" r="12" fill="#FFFFFF" fill-opacity="0.7"/>
+  <circle cx="392" cy="366" r="12" fill="#FFFFFF" fill-opacity="0.7"/>
+
+  <!-- 刻度线 -->
+  <g stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="5" stroke-linecap="round">
+    <line x1="188" y1="350" x2="188" y2="382"/>
+    <line x1="256" y1="350" x2="256" y2="382"/>
+    <line x1="324" y1="350" x2="324" y2="382"/>
+  </g>
+
+  <!-- 鲸鱼滑块（DeepSeek 风格剪影，头朝左，尾鳍右上翘） -->
+  <path fill="#FFFFFF" d="
+    M 178 330
+    C 178 300, 196 284, 220 284
+    C 248 284, 270 296, 286 318
+    C 300 337, 316 336, 330 330
+    C 344 324, 352 328, 352 338
+    C 352 352, 340 360, 324 362
+    C 292 366, 220 366, 194 358
+    C 172 351, 178 344, 178 330
+    Z
+  "/>
+
+  <!-- 鲸鱼眼睛 -->
+  <circle cx="218" cy="312" r="7" fill="#3552D8"/>
+
+  <!-- 鲸鱼喷水 -->
+  <g stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" fill="none">
+    <path d="M 292 286 C 296 268, 308 262, 314 252"/>
+    <path d="M 304 280 C 310 264, 322 258, 328 246"/>
+  </g>
+  <circle cx="330" cy="244" r="5" fill="#FFFFFF"/>
+  <circle cx="316" cy="250" r="4" fill="#FFFFFF"/>
+</svg>
