@@ -37,3 +37,11 @@ export function getProgression(rawLevel: number): ProgressionState {
     strength: level / MAX_LEVEL,
   };
 }
+
+// 社区投票 → 等级映射：从中间 15 级起，每 1 张净票（up - down）移动 0.5 级。
+export const COMMUNITY_BASE_LEVEL = 15;
+export const COMMUNITY_VOTE_STEP = 0.5;
+
+export function communityLevelFromTally(up: number, down: number): number {
+  return clampPosition(COMMUNITY_BASE_LEVEL + (up - down) * COMMUNITY_VOTE_STEP);
+}

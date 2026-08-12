@@ -1,4 +1,11 @@
-import { clampPosition, getProgression, MAX_LEVEL, STAGES } from "./progression";
+import {
+  clampPosition,
+  communityLevelFromTally,
+  getProgression,
+  MAX_LEVEL,
+  STAGES,
+} from "./progression";
+import type { VoteDirection } from "./vote";
 
 export interface AppController {
   readonly canvas: HTMLCanvasElement;
@@ -8,9 +15,14 @@ export interface AppController {
   setLoading(loaded: number, total: number): void;
   setReady(): void;
   setError(message: string): void;
+  setVotes(up: number, down: number): void;
+  setVoteState(state: VoteState, message?: string): void;
+  onVote(handler: VoteHandler): void;
 }
 
 export type LevelChangeHandler = (level: number) => void;
+export type VoteState = "idle" | "voting" | "voted" | "error";
+export type VoteHandler = (direction: VoteDirection) => void;
 
 function createTicks(): string {
   return Array.from(
@@ -83,6 +95,28 @@ export function mountApp(
         <p class="drag-hint"><span aria-hidden="true">←</span> 拖动以增强梁系浓度 <span aria-hidden="true">→</span></p>
       </section>
 
+      <section class="vote-panel" aria-label="社区梁系投票">
+        <div class="vote-head">
+          <span class="vote-title">社区梁系裁决</span>
+          <span class="vote-state" role="status" data-state="idle">未投票</span>
+        </div>
+        <div class="vote-actions">
+          <button class="vote-btn vote-btn--down" type="button" data-direction="down">
+            <span class="vote-arrow" aria-hidden="true">▼</span>
+            <span class="vote-label">往下</span>
+            <span class="vote-count" data-count="down">0</span>
+          </button>
+          <button class="vote-btn vote-btn--up" type="button" data-direction="up">
+            <span class="vote-arrow" aria-hidden="true">▲</span>
+            <span class="vote-label">往上</span>
+            <span class="vote-count" data-count="up">0</span>
+          </button>
+        </div>
+        <p class="vote-community">
+          社区评定：<strong class="vote-community-level">—</strong>
+        </p>
+      </section>
+
       <footer class="footer-note">
         <span>31 级连续进化</span>
         <span>正脸识别协议：已启用</span>
@@ -100,6 +134,17 @@ export function mountApp(
   const loadState = root.querySelector<HTMLElement>(".load-state")!;
   const ticks = Array.from(root.querySelectorAll<HTMLElement>(".tick"));
   const markers = Array.from(root.querySelectorAll<HTMLElement>(".stage-marker"));
+
+  const voteState = root.querySelector<HTMLElement>(".vote-state")!;
+  const voteCommunityLevel = root.querySelector<HTMLElement>(
+    ".vote-community-level",
+  )!;
+  const upCount = root.querySelector<HTMLElement>('[data-count="up"]')!;
+  const downCount = root.querySelector<HTMLElement>('[data-count="down"]')!;
+  const voteButtons = Array.from(
+    root.querySelectorAll<HTMLButtonElement>(".vote-btn"),
+  );
+
   let currentPosition = 0;
 
   const setLevel = (rawLevel: number): void => {
@@ -131,6 +176,36 @@ export function mountApp(
     onLevelChange(position);
   };
 
+  const setVotes = (up: number, down: number): void => {
+    upCount.textContent = String(up);
+    downCount.textContent = String(down);
+    const level = communityLevelFromTally(up, down);
+    const state = getProgression(level);
+    voteCommunityLevel.textContent = `${state.stage} · ${state.level} 级`;
+  };
+
+  const setVoteState = (state: VoteState, message?: string): void => {
+    voteState.dataset.state = state;
+    const defaults: Record<VoteState, string> = {
+      idle: "未投票",
+      voting: "投票中…",
+      voted: "已投票",
+      error: "出错了",
+    };
+    voteState.textContent = message ?? defaults[state];
+    voteButtons.forEach((button) => {
+      button.disabled = state === "voting";
+    });
+  };
+
+  const onVote = (handler: VoteHandler): void => {
+    voteButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        handler(button.dataset.direction as VoteDirection);
+      });
+    });
+  };
+
   slider.addEventListener("input", () => {
     setLevel(Number(slider.value));
   });
@@ -144,6 +219,9 @@ export function mountApp(
       return currentPosition;
     },
     setLevel,
+    setVotes,
+    setVoteState,
+    onVote,
     setLoading(loaded, total) {
       loadState.textContent = loaded >= total ? "连续祖力已就绪" : "载入连续祖力…";
     },

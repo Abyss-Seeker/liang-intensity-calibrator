@@ -604,3 +604,128 @@ h1 {
     transform: none !important;
   }
 }
+
+/* —— 社区投票面板 —— */
+
+.vote-panel {
+  position: relative;
+  z-index: 10;
+  width: min(760px, 100%);
+  margin: 14px auto 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, #e8e9e5 78%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.vote-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.vote-title {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.vote-state {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.vote-state[data-state="voted"] {
+  color: var(--accent);
+}
+
+.vote-state[data-state="error"] {
+  color: #b52b24;
+}
+
+.vote-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.vote-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 9px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.vote-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.vote-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.vote-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vote-btn--up .vote-arrow {
+  color: #b52b24;
+}
+
+.vote-btn--down .vote-arrow {
+  color: #2b6cb0;
+}
+
+.vote-label {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.vote-count {
+  min-width: 1.5em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--ink);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.vote-community {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.vote-community-level {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .vote-panel {
+    margin-top: 10px;
+    padding: 10px;
+  }
+
+  .vote-btn {
+    padding: 10px 8px;
+  }
+}
