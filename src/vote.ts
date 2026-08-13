@@ -13,17 +13,12 @@ export interface VoteTally {
   events: VoteEvent[];
   voted: boolean;
   votedDirection: "up" | "down" | null;
-  halfLifeHours: number;
 }
 
 export type VoteDirection = "up" | "down";
 
 export interface VoteResponse extends VoteTally {
   reason?: string;
-}
-
-export interface VoteSettings {
-  halfLifeHours: number;
 }
 
 export async function fetchVotes(): Promise<VoteTally> {
@@ -42,7 +37,6 @@ export async function fetchVotes(): Promise<VoteTally> {
     events: data.events ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,
-    halfLifeHours: data.halfLifeHours ?? 120,
   };
 }
 
@@ -77,31 +71,6 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
     events: data.events ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,
-    halfLifeHours: data.halfLifeHours ?? 120,
     reason: data.reason,
   };
-}
-
-export async function fetchSettings(): Promise<VoteSettings> {
-  const response = await fetch("/api/settings");
-  if (!response.ok) {
-    throw new Error("读取设置失败");
-  }
-  const data = (await response.json()) as VoteSettings;
-  return { halfLifeHours: data.halfLifeHours ?? 120 };
-}
-
-export async function saveSettings(
-  halfLifeHours: number,
-): Promise<VoteSettings> {
-  const response = await fetch("/api/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ halfLifeHours }),
-  });
-  const data = (await response.json()) as VoteSettings & { reason?: string };
-  if (!response.ok) {
-    throw new Error(data.reason ?? "保存设置失败");
-  }
-  return { halfLifeHours: data.halfLifeHours };
 }

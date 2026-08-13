@@ -7,11 +7,15 @@ import {
   VideoLoadTimeoutError,
 } from "./video-renderer";
 import {
+  DEFAULT_HALF_LIFE_HOURS,
+  halfLifeMsFromHours,
+  tallyFromEvents,
+} from "./progression";
+import {
   castVote,
   fetchVotes,
-  saveSettings,
   type VoteDirection,
-  type VoteTally,
+  type VoteEvent,
 } from "./vote";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -20,11 +24,42 @@ if (!app) {
   throw new Error("找不到应用挂载节点");
 }
 
+const HALF_LIFE_STORAGE_KEY = "liang-half-life-hours";
+const MIN_HALF_LIFE_HOURS = 1;
+const MAX_HALF_LIFE_HOURS = 8760;
+
+// 半衰期仅存用户浏览器本地（localStorage），不全局共享。
+function loadLocalHalfLife(): number {
+  try {
+    const raw = Number(localStorage.getItem(HALF_LIFE_STORAGE_KEY));
+    if (
+      Number.isFinite(raw) &&
+      raw >= MIN_HALF_LIFE_HOURS &&
+      raw <= MAX_HALF_LIFE_HOURS
+    ) {
+      return raw;
+    }
+  } catch {
+    // localStorage 不可用（隐私模式）时回退默认
+  }
+  return DEFAULT_HALF_LIFE_HOURS;
+}
+
+function saveLocalHalfLife(hours: number): void {
+  try {
+    localStorage.setItem(HALF_LIFE_STORAGE_KEY, String(hours));
+  } catch {
+    // 忽略存储失败，仅本次会话生效
+  }
+}
+
 let controller: AppController | null = null;
 let renderer: EvolutionVideoRenderer | null = null;
 let communityLevel = 15;
 let animFrame = 0;
 let userAdjustedLevel = false;
+let localHalfLifeHours = loadLocalHalfLife();
+let currentEvents: VoteEvent[] = [];
 const FRAME_TIMEOUT_RELOAD_KEY = "liang-frame-timeout-reloaded";
 
 const recoverFromFrameError = (error: unknown): void => {
@@ -52,7 +87,11 @@ const requestDraw = (level: number): void => {
   renderer?.render(level);
 };
 
-const applyTally = (tally: VoteTally): void => {
+// 用本地半衰期重算等级 + 更新 UI（社区评定/单票影响力/走势图），
+// 让半衰期只影响本机显示，不依赖后端全局值。
+const recalcLocalTally = (): void => {
+  const halfLifeMs = halfLifeMsFromHours(localHalfLifeHours);
+  const tally = tallyFromEvents(currentEvents, halfLifeMs, Date.now());
   communityLevel = tally.level;
   controller?.setVotes(
     tally.up,
@@ -61,8 +100,13 @@ const applyTally = (tally: VoteTally): void => {
     tally.weightedUp,
     tally.weightedDown,
   );
-  controller?.setEvents(tally.events);
-  controller?.setHalfLife(tally.halfLifeHours);
+  controller?.setEvents(currentEvents);
+  controller?.setHalfLife(localHalfLifeHours);
+};
+
+const applyTally = (events: VoteEvent[]): void => {
+  currentEvents = events;
+  recalcLocalTally();
 };
 
 const animateToLevel = (target: number): void => {
@@ -86,9 +130,9 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally);
+    applyTally(tally.events);
     if (!userAdjustedLevel && controller && !controller.slider.disabled) {
-      controller.setLevel(tally.level);
+      controller.setLevel(communityLevel);
     }
     if (tally.voted) {
       controller?.setVoteState(
@@ -126,6 +170,7 @@ controller = mountApp(app, requestDraw);
 renderer = createEvolutionVideoRenderer(controller.portrait);
 controller.setLevel(communityLevel);
 controller.setLoading(0, 1);
+controller.setHalfLife(localHalfLifeHours);
 controller.slider.addEventListener("input", () => {
   userAdjustedLevel = true;
 });
@@ -134,14 +179,14 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result);
+    applyTally(result.events);
     if (result.reason) {
       controller?.setVoteState(
         "voted",
         `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
       );
     } else {
-      animateToLevel(result.level);
+      animateToLevel(communityLevel);
       controller?.setVoteState(
         "voted",
         `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
@@ -156,19 +201,12 @@ controller.onShowCommunity(() => {
   animateToLevel(communityLevel);
 });
 
-controller.onSaveHalfLife(async (hours: number) => {
-  try {
-    const saved = await saveSettings(hours);
-    controller?.setHalfLife(saved.halfLifeHours);
-    controller?.setHalfLifeStatus(`已保存，半衰期 ${saved.halfLifeHours} 小时`);
-    // 半衰期变了，重新拉一次票数让等级和走势图立即反映新衰减
-    await syncVotes();
-  } catch (error) {
-    controller?.setHalfLifeStatus(
-      error instanceof Error ? error.message : "保存失败，请重试",
-      true,
-    );
-  }
+controller.onSaveHalfLife((hours: number) => {
+  localHalfLifeHours = hours;
+  saveLocalHalfLife(hours);
+  controller?.setHalfLife(hours);
+  controller?.setHalfLifeStatus(`已保存（仅本机生效），半衰期 ${hours} 小时`);
+  recalcLocalTally();
 });
 
 // The portrait is the primary interaction and must never wait for the community
@@ -199,3 +237,4 @@ if (isInAppBrowser()) {
 window.addEventListener("resize", () => {
   renderer?.redraw();
 });
+

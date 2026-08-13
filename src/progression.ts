@@ -144,3 +144,35 @@ export function levelSeries(
   }
   return points;
 }
+
+// 从事件流 + 本地半衰期直接算加权票数与等级（前端本地重算用，
+// 让"社区评定/单票影响力"跟随用户自己设定的半衰期，而非后端全局值）。
+export function tallyFromEvents(
+  events: VoteEventPoint[],
+  halfLifeMs: number,
+  now: number,
+): { up: number; down: number; weightedUp: number; weightedDown: number; level: number } {
+  let up = 0;
+  let down = 0;
+  let upW = 0;
+  let downW = 0;
+  for (const e of events) {
+    const age = now - e.t;
+    if (age < 0 || age > VOTE_WINDOW_MS) continue;
+    const w = voteWeight(age, halfLifeMs);
+    if (e.d === "up") {
+      up += 1;
+      upW += w;
+    } else {
+      down += 1;
+      downW += w;
+    }
+  }
+  return {
+    up,
+    down,
+    weightedUp: upW,
+    weightedDown: downW,
+    level: levelFromTally(upW, downW),
+  };
+}

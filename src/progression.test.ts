@@ -9,6 +9,7 @@ import {
   halfLifeMsFromHours,
   levelSeries,
   singleVoteImpact,
+  tallyFromEvents,
   voteWeight,
 } from "./progression";
 
@@ -169,5 +170,39 @@ describe("levelSeries", () => {
     for (let i = 1; i < series.length; i++) {
       expect(series[i].level).toBeGreaterThanOrEqual(series[i - 1].level);
     }
+  });
+});
+
+describe("tallyFromEvents", () => {
+  const now = Date.now();
+
+  it("空事件流返回 15 级", () => {
+    const t = tallyFromEvents([], halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS), now);
+    expect(t.level).toBe(15);
+    expect(t.up).toBe(0);
+    expect(t.down).toBe(0);
+  });
+
+  it("半衰期越短，旧票淡化越快、等级越低", () => {
+    const events = [
+      { t: now - 24 * 3600 * 1000, d: "up" as const }, // 24 小时前的 up 票
+    ];
+    const long = tallyFromEvents(events, halfLifeMsFromHours(120), now);
+    const short = tallyFromEvents(events, halfLifeMsFromHours(24), now);
+    // 120h 半衰期下，24h 旧票权重 ≈0.87；24h 半衰期下权重 ≈0.5，等级更低
+    expect(long.level).toBeGreaterThan(short.level);
+  });
+
+  it("返回原始票数与加权票数", () => {
+    const events = [
+      { t: now, d: "up" as const },
+      { t: now, d: "up" as const },
+      { t: now, d: "down" as const },
+    ];
+    const t = tallyFromEvents(events, halfLifeMsFromHours(120), now);
+    expect(t.up).toBe(2);
+    expect(t.down).toBe(1);
+    expect(t.weightedUp).toBeCloseTo(2, 5);
+    expect(t.weightedDown).toBeCloseTo(1, 5);
   });
 });
