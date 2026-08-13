@@ -61,10 +61,12 @@ describe("createEvolutionVideoRenderer", () => {
     expect(() => renderer.redraw()).not.toThrow();
   });
 
-  it("load() memoizes its promise", () => {
+  it("load() memoizes its promise", async () => {
     const { renderer } = setup();
     const first = renderer.load();
     const second = renderer.load();
     expect(first).toBe(second);
+    // 测试环境 fetch 相对 URL 会失败，吞掉 rejection 避免 unhandled
+    await first.catch(() => undefined);
   });
 });

@@ -67,6 +67,7 @@ export function createEvolutionVideoRenderer(
   let objectUrl: string | undefined;
   let renderedCallbacks: Array<() => void> = [];
   let seekRetries = 0;
+  let seeking = false; // 串行化：一次只允许一个 seek 在途
 
   const drawNow = (): boolean => {
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
@@ -114,44 +115,67 @@ export function createEvolutionVideoRenderer(
 
   const seekTo = (target: number): void => {
     const version = requestVersion;
+
+    // 已经到位且没有在 seek，直接画帧
     if (Math.abs(video.currentTime - target) < 0.001 && !video.seeking) {
+      seeking = false;
       finishLatestFrame(version);
       return;
     }
 
-    const onSeeked = (): void => {
+    let settled = false;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
       video.removeEventListener("seeked", onSeeked);
-      if (version !== requestVersion) return;
-      if (Math.abs(video.currentTime - target) >= 0.001 && seekRetries < SEEK_RETRY) {
-        seekRetries += 1;
-        seekTo(target);
-        return;
+      seeking = false;
+      // 目标在 seek 期间又变了 → 追最新；否则画当前帧
+      if (version !== requestVersion) {
+        seekLatest();
+      } else {
+        seekRetries = 0;
+        finishLatestFrame(version);
       }
-      seekRetries = 0;
-      finishLatestFrame(version);
     };
+
+    const onSeeked = (): void => {
+      // seeked 已触发但没到位（罕见），且有重试额度 → 再 seek 一次
+      if (
+        Math.abs(video.currentTime - target) >= 0.001 &&
+        seekRetries < SEEK_RETRY
+      ) {
+        seekRetries += 1;
+        try {
+          video.currentTime = target;
+          return;
+        } catch {
+          /* 落入 settle */
+        }
+      }
+      settle();
+    };
+
     video.addEventListener("seeked", onSeeked);
 
     try {
       video.currentTime = target;
     } catch {
-      video.removeEventListener("seeked", onSeeked);
-      finishLatestFrame(version);
+      settle();
       return;
     }
 
     // seek 确认超时兜底：seeked 迟迟不来就画当前帧（至少有一张脸）
-    window.setTimeout(() => {
-      if (version !== requestVersion) return;
-      video.removeEventListener("seeked", onSeeked);
-      finishLatestFrame(version);
-    }, SEEK_TIMEOUT_MS);
+    window.setTimeout(settle, SEEK_TIMEOUT_MS);
   };
 
   const seekLatest = (): void => {
     if (!loaded) return;
     const duration = video.duration;
     if (!Number.isFinite(duration) || duration <= 0) return;
+    // 串行化：seek 在途时只记目标（requestedPosition 已更新），
+    // 等 settle 后再追最新，避免快速拖动时 seek 队列堆积造成卡顿跳帧。
+    if (seeking) return;
+    seeking = true;
     seekTo(targetTime());
   };
 
