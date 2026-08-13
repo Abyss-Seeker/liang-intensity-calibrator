@@ -26,12 +26,20 @@ function postVote(direction: string): Request {
   return new Request("https://example.com/api/vote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ direction }),
+    body: JSON.stringify({ direction, resetAt: Date.now() + 86400000 }),
+  });
+}
+
+function postSettings(halfLifeHours: number): Request {
+  return new Request("https://example.com/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ halfLifeHours }),
   });
 }
 
 describe("vote api", () => {
-  it("GET 返回初始 0 票、中间等级和未投票状态", async () => {
+  it("GET 返回初始 0 票、中间等级、默认半衰期和未投票状态", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/vote"),
@@ -45,6 +53,7 @@ describe("vote api", () => {
     expect(data.events).toEqual([]);
     expect(data.voted).toBe(false);
     expect(data.votedDirection).toBe(null);
+    expect(data.halfLifeHours).toBe(120);
   });
 
   it("POST up 增加 up 票并记录事件流与已投票状态", async () => {
@@ -58,6 +67,7 @@ describe("vote api", () => {
     expect(data.level).toBeGreaterThan(15);
     expect(data.events).toHaveLength(1);
     expect(data.events[0].d).toBe("up");
+    expect(data.halfLifeHours).toBe(120);
   });
 
   it("GET 能返回当前 IP 的已投票状态", async () => {
@@ -87,6 +97,26 @@ describe("vote api", () => {
   it("非法方向返回 400", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("sideways"), env);
+    expect(response.status).toBe(400);
+  });
+
+  it("POST /api/settings 保存半衰期后，GET 返回新值", async () => {
+    const { env } = makeEnv();
+    const save = await worker.fetch(postSettings(48), env);
+    const saveData = await save.json();
+    expect(saveData.halfLifeHours).toBe(48);
+
+    const get = await worker.fetch(
+      new Request("https://example.com/api/vote"),
+      env,
+    );
+    const data = await get.json();
+    expect(data.halfLifeHours).toBe(48);
+  });
+
+  it("非法半衰期返回 400", async () => {
+    const { env } = makeEnv();
+    const response = await worker.fetch(postSettings(0), env);
     expect(response.status).toBe(400);
   });
 });

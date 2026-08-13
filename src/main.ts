@@ -9,6 +9,7 @@ import {
 import {
   castVote,
   fetchVotes,
+  saveSettings,
   type VoteDirection,
   type VoteTally,
 } from "./vote";
@@ -61,6 +62,7 @@ const applyTally = (tally: VoteTally): void => {
     tally.weightedDown,
   );
   controller?.setEvents(tally.events);
+  controller?.setHalfLife(tally.halfLifeHours);
 };
 
 const animateToLevel = (target: number): void => {
@@ -152,6 +154,21 @@ controller.onVote(async (direction: VoteDirection) => {
 
 controller.onShowCommunity(() => {
   animateToLevel(communityLevel);
+});
+
+controller.onSaveHalfLife(async (hours: number) => {
+  try {
+    const saved = await saveSettings(hours);
+    controller?.setHalfLife(saved.halfLifeHours);
+    controller?.setHalfLifeStatus(`已保存，半衰期 ${saved.halfLifeHours} 小时`);
+    // 半衰期变了，重新拉一次票数让等级和走势图立即反映新衰减
+    await syncVotes();
+  } catch (error) {
+    controller?.setHalfLifeStatus(
+      error instanceof Error ? error.message : "保存失败，请重试",
+      true,
+    );
+  }
 });
 
 // The portrait is the primary interaction and must never wait for the community

@@ -1,6 +1,8 @@
 import {
   clampPosition,
+  DEFAULT_HALF_LIFE_HOURS,
   getProgression,
+  halfLifeMsFromHours,
   levelSeries,
   MAX_LEVEL,
   singleVoteImpact,
@@ -19,8 +21,11 @@ export interface AppController {
   setVotes(up: number, down: number, level: number, weightedUp: number, weightedDown: number): void;
   setVoteState(state: VoteState, message?: string): void;
   setEvents(events: VoteEvent[]): void;
+  setHalfLife(hours: number): void;
+  setHalfLifeStatus(message: string, isError?: boolean): void;
   onVote(handler: VoteHandler): void;
   onShowCommunity(handler: () => void): void;
+  onSaveHalfLife(handler: (hours: number) => void): void;
 }
 
 export type LevelChangeHandler = (level: number) => void;
@@ -105,8 +110,9 @@ function renderChart(
   svg: SVGSVGElement,
   events: VoteEvent[],
   rangeKey: RangeKey,
+  halfLifeMs: number,
 ): ChartPoint[] {
-  const series = levelSeries(events);
+  const series = levelSeries(events, halfLifeMs);
   const now = Date.now();
 
   // 逻辑坐标（x 用时间戳或票序号）
@@ -327,6 +333,26 @@ export function mountApp(
         <button class="vote-show-community" type="button" data-action="show-community">
           查看社区评价
         </button>
+
+        <details class="vote-settings">
+          <summary class="vote-settings-toggle">半衰期设置 <span class="vote-settings-current"></span></summary>
+          <div class="vote-settings-body">
+            <p class="vote-settings-hint">票的权重随时间的半衰期（小时），越小旧票淡化越快。默认 120（5 天）。</p>
+            <div class="vote-settings-row">
+              <input
+                class="vote-settings-input"
+                type="number"
+                min="1"
+                max="8760"
+                step="1"
+                inputmode="numeric"
+                aria-label="半衰期小时数"
+              />
+              <button class="vote-settings-save" type="button" data-action="save-half-life">保存</button>
+            </div>
+            <p class="vote-settings-status" role="status"></p>
+          </div>
+        </details>
       </section>
 
       <footer class="footer-note">
@@ -376,10 +402,23 @@ export function mountApp(
   const showCommunityButton = root.querySelector<HTMLButtonElement>(
     '[data-action="show-community"]',
   )!;
+  const halfLifeInput = root.querySelector<HTMLInputElement>(
+    ".vote-settings-input",
+  )!;
+  const halfLifeCurrent = root.querySelector<HTMLElement>(
+    ".vote-settings-current",
+  )!;
+  const halfLifeStatus = root.querySelector<HTMLElement>(
+    ".vote-settings-status",
+  )!;
+  const halfLifeSaveButton = root.querySelector<HTMLButtonElement>(
+    '[data-action="save-half-life"]',
+  )!;
 
   let currentPosition = 0;
   let currentEvents: VoteEvent[] = [];
   let currentRange: RangeKey = "24h";
+  let currentHalfLifeMs = halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS);
   let chartPoints: ChartPoint[] = [];
 
   const setLevel = (rawLevel: number): void => {
@@ -416,7 +455,7 @@ export function mountApp(
   };
 
   const redrawChart = (): void => {
-    chartPoints = renderChart(chartSvg, currentEvents, currentRange);
+    chartPoints = renderChart(chartSvg, currentEvents, currentRange, currentHalfLifeMs);
   };
 
   const setVotes = (
@@ -439,6 +478,13 @@ export function mountApp(
 
   const setEvents = (events: VoteEvent[]): void => {
     currentEvents = events;
+    redrawChart();
+  };
+
+  const setHalfLife = (hours: number): void => {
+    currentHalfLifeMs = halfLifeMsFromHours(hours);
+    halfLifeInput.value = String(hours);
+    halfLifeCurrent.textContent = `（当前 ${hours} 小时）`;
     redrawChart();
   };
 
@@ -466,6 +512,31 @@ export function mountApp(
 
   const onShowCommunity = (handler: () => void): void => {
     showCommunityButton.addEventListener("click", handler);
+  };
+
+  const onSaveHalfLife = (handler: (hours: number) => void): void => {
+    const submit = (): void => {
+      const raw = Number(halfLifeInput.value);
+      if (!Number.isFinite(raw) || raw < 1 || raw > 8760) {
+        halfLifeStatus.textContent = "请输入 1~8760 之间的整数";
+        return;
+      }
+      halfLifeStatus.textContent = "保存中…";
+      handler(Math.round(raw));
+    };
+    halfLifeSaveButton.addEventListener("click", submit);
+    halfLifeInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+    });
+  };
+
+  // 暴露半衰期保存结果的反馈（由 main.ts 在保存后调用）
+  const setHalfLifeStatus = (message: string, isError: boolean): void => {
+    halfLifeStatus.textContent = message;
+    halfLifeStatus.classList.toggle("is-error", isError);
   };
 
   rangeButtons.forEach((button) => {
@@ -568,8 +639,11 @@ export function mountApp(
     setVotes,
     setVoteState,
     setEvents,
+    setHalfLife,
+    setHalfLifeStatus,
     onVote,
     onShowCommunity,
+    onSaveHalfLife,
     setLoading(loaded, total) {
       loadState.textContent = loaded >= total ? "连续祖力已就绪" : "正在加载…";
     },

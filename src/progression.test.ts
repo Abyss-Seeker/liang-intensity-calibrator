@@ -4,7 +4,9 @@ import {
   clampPosition,
   communityLevelFromTally,
   consensusFactor,
+  DEFAULT_HALF_LIFE_HOURS,
   getProgression,
+  halfLifeMsFromHours,
   levelSeries,
   singleVoteImpact,
   voteWeight,
@@ -130,17 +132,24 @@ describe("singleVoteImpact", () => {
 
 describe("voteWeight", () => {
   it("age 为 0 时权重为 1", () => {
-    expect(voteWeight(0)).toBe(1);
+    expect(voteWeight(0, halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS))).toBe(1);
   });
 
   it("一个半衰期后权重约 0.5", () => {
-    expect(voteWeight(5 * 24 * 3600 * 1000)).toBeCloseTo(0.5, 5);
+    expect(
+      voteWeight(
+        halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS),
+        halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS),
+      ),
+    ).toBeCloseTo(0.5, 5);
   });
 });
 
 describe("levelSeries", () => {
+  const halfLifeMs = halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS);
+
   it("空事件流返回空序列", () => {
-    expect(levelSeries([])).toEqual([]);
+    expect(levelSeries([], halfLifeMs)).toEqual([]);
   });
 
   it("全赞成票累积，等级单调上升（无死区，首票即有效果）", () => {
@@ -149,7 +158,7 @@ describe("levelSeries", () => {
       t: now + i * 1000,
       d: "up" as const,
     }));
-    const series = levelSeries(events);
+    const series = levelSeries(events, halfLifeMs);
     expect(series).toHaveLength(5);
     // 无死区：第一票就有微弱影响
     expect(series[0].level).toBeGreaterThan(15);

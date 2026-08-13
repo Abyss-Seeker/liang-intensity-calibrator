@@ -21,16 +21,23 @@ interface VoteEvent {
   d: "up" | "down";
 }
 
+interface Settings {
+  halfLifeHours: number;
+}
+
 const BASE_LEVEL = 15;
 const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
 const CONSENSUS_FLOOR = 0.1; // 共识度下限：对半附近每票仍有微弱影响（无死区）
 const CONSENSUS_R_FULL = 0.1; // 满级容忍带：少数方占比 ≤10%（即 9:1 以上）即满级
 const CONSENSUS_N_FULL = 20; // 样本满级门槛：总票数 ≥20 才精确满级
-const HALF_LIFE_MS = 5 * 24 * 3600 * 1000; // 指数半衰期 5 天
+const DEFAULT_HALF_LIFE_HOURS = 120; // 默认半衰期 120 小时（5 天）
+const MIN_HALF_LIFE_HOURS = 1; // 半衰期下限（小时），防除零/负数
+const MAX_HALF_LIFE_HOURS = 24 * 365; // 半衰期上限（小时）
 const WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
 const EVENTS_KEY = "events";
+const SETTINGS_KEY = "settings";
 const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
-const VOTE_TTL_SECONDS = 24 * 60 * 60;
+const VOTE_TTL_SECONDS = 24 * 60 * 60; // 兜底：未提供 resetAt 时的默认 TTL
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -71,8 +78,8 @@ function levelFromTally(upW: number, downW: number): number {
 }
 
 // 单票在 age 毫秒前的权重（指数半衰期）
-function voteWeight(ageMs: number): number {
-  return Math.pow(0.5, ageMs / HALF_LIFE_MS);
+function voteWeight(ageMs: number, halfLifeMs: number): number {
+  return Math.pow(0.5, ageMs / halfLifeMs);
 }
 
 function clientIp(request: Request): string {
@@ -90,8 +97,32 @@ async function readEvents(env: Env): Promise<VoteEvent[]> {
   }
 }
 
+// 读取半衰期设置，非法/缺失时回退默认 120 小时。
+async function readSettings(env: Env): Promise<Settings> {
+  const raw = await env.VOTES.get(SETTINGS_KEY);
+  if (!raw) return { halfLifeHours: DEFAULT_HALF_LIFE_HOURS };
+  try {
+    const parsed = JSON.parse(raw) as { halfLifeHours?: unknown };
+    const hours = Number(parsed.halfLifeHours);
+    if (
+      Number.isFinite(hours) &&
+      hours >= MIN_HALF_LIFE_HOURS &&
+      hours <= MAX_HALF_LIFE_HOURS
+    ) {
+      return { halfLifeHours: hours };
+    }
+    return { halfLifeHours: DEFAULT_HALF_LIFE_HOURS };
+  } catch {
+    return { halfLifeHours: DEFAULT_HALF_LIFE_HOURS };
+  }
+}
+
 // 计算当前加权票数与等级（时间衰减后），供等级映射使用。
-function computeTally(events: VoteEvent[], now: number) {
+function computeTally(
+  events: VoteEvent[],
+  now: number,
+  halfLifeMs: number,
+) {
   let up = 0;
   let down = 0;
   let upW = 0;
@@ -99,7 +130,7 @@ function computeTally(events: VoteEvent[], now: number) {
   for (const e of events) {
     const age = now - e.t;
     if (age < 0 || age > WINDOW_MS) continue;
-    const w = voteWeight(age);
+    const w = voteWeight(age, halfLifeMs);
     if (e.d === "up") {
       up += 1;
       upW += w;
@@ -118,19 +149,32 @@ function computeTally(events: VoteEvent[], now: number) {
   };
 }
 
+// 根据用户本地时区的"下一个午夜"时间戳计算 voted:{ip} 的 TTL。
+// resetAt 是前端传来的本地午夜绝对时间戳（毫秒）；TTL 是"离午夜还剩多少秒"，
+// 让每天的投票在用户本地 0 点重置（而非投完 24h）。clamp 到 [1s, 24h]。
+function voteTtlSeconds(resetAt: unknown, now: number): number {
+  const ms = Number(resetAt);
+  if (!Number.isFinite(ms) || ms <= now) return VOTE_TTL_SECONDS;
+  const seconds = Math.round((ms - now) / 1000);
+  return Math.min(Math.max(seconds, 1), VOTE_TTL_SECONDS);
+}
+
 async function handleVote(request: Request, env: Env): Promise<Response> {
   const ip = clientIp(request);
   const votedKey = `voted:${ip}`;
   const alreadyVoted = await env.VOTES.get(votedKey);
+  const settings = await readSettings(env);
+  const halfLifeMs = settings.halfLifeHours * 3600 * 1000;
 
   if (request.method === "GET") {
     const events = await readEvents(env);
-    const tally = computeTally(events, Date.now());
+    const tally = computeTally(events, Date.now(), halfLifeMs);
     return json({
       ...tally,
       events,
       voted: Boolean(alreadyVoted),
       votedDirection: alreadyVoted ?? null,
+      halfLifeHours: settings.halfLifeHours,
     });
   }
 
@@ -139,9 +183,14 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   }
 
   let direction: string;
+  let resetAt: unknown;
   try {
-    const body = (await request.json()) as { direction?: string };
+    const body = (await request.json()) as {
+      direction?: string;
+      resetAt?: unknown;
+    };
     direction = body.direction ?? "";
+    resetAt = body.resetAt;
   } catch {
     return json({ reason: "请求体不是合法 JSON" }, 400);
   }
@@ -152,24 +201,68 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
 
   if (alreadyVoted) {
     const events = await readEvents(env);
-    const tally = computeTally(events, Date.now());
+    const tally = computeTally(events, Date.now(), halfLifeMs);
     return json({
       ...tally,
       events,
       voted: true,
       votedDirection: alreadyVoted,
       reason: "今天已经投过票了，明天再来吧",
+      halfLifeHours: settings.halfLifeHours,
     });
   }
 
+  const now = Date.now();
   const events = await readEvents(env);
-  events.push({ t: Date.now(), d: direction });
+  events.push({ t: now, d: direction });
   const trimmed = events.slice(-EVENTS_MAX);
   await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
-  await env.VOTES.put(votedKey, direction, { expirationTtl: VOTE_TTL_SECONDS });
+  await env.VOTES.put(votedKey, direction, {
+    expirationTtl: voteTtlSeconds(resetAt, now),
+  });
 
-  const tally = computeTally(trimmed, Date.now());
-  return json({ ...tally, events: trimmed, voted: true, votedDirection: direction });
+  const tally = computeTally(trimmed, now, halfLifeMs);
+  return json({
+    ...tally,
+    events: trimmed,
+    voted: true,
+    votedDirection: direction,
+    halfLifeHours: settings.halfLifeHours,
+  });
+}
+
+async function handleSettings(request: Request, env: Env): Promise<Response> {
+  if (request.method === "GET") {
+    const settings = await readSettings(env);
+    return json(settings);
+  }
+
+  if (request.method !== "POST") {
+    return json({ reason: "不支持的请求方法" }, 405);
+  }
+
+  let hours: number;
+  try {
+    const body = (await request.json()) as { halfLifeHours?: unknown };
+    hours = Number(body.halfLifeHours);
+  } catch {
+    return json({ reason: "请求体不是合法 JSON" }, 400);
+  }
+
+  if (
+    !Number.isFinite(hours) ||
+    hours < MIN_HALF_LIFE_HOURS ||
+    hours > MAX_HALF_LIFE_HOURS
+  ) {
+    return json(
+      { reason: `半衰期需在 ${MIN_HALF_LIFE_HOURS}~${MAX_HALF_LIFE_HOURS} 小时之间` },
+      400,
+    );
+  }
+
+  const settings: Settings = { halfLifeHours: hours };
+  await env.VOTES.put(SETTINGS_KEY, JSON.stringify(settings));
+  return json(settings);
 }
 
 export default {
@@ -177,6 +270,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/api/vote") {
       return handleVote(request, env);
+    }
+    if (url.pathname === "/api/settings") {
+      return handleSettings(request, env);
     }
     return env.ASSETS.fetch(request);
   },

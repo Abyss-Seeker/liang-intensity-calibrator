@@ -89,12 +89,17 @@ export function singleVoteImpact(up: number, down: number): number {
 }
 
 // —— 时间衰减（与 worker 端保持一致）——
-export const VOTE_HALF_LIFE_MS = 5 * 24 * 3600 * 1000; // 指数半衰期 5 天
+export const DEFAULT_HALF_LIFE_HOURS = 120; // 默认半衰期 120 小时（5 天）
 export const VOTE_WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
 
+// 半衰期（小时）→ 毫秒
+export function halfLifeMsFromHours(hours: number): number {
+  return hours * 3600 * 1000;
+}
+
 // 单票在 age 毫秒前的权重（指数半衰期）
-export function voteWeight(ageMs: number): number {
-  return Math.pow(0.5, ageMs / VOTE_HALF_LIFE_MS);
+export function voteWeight(ageMs: number, halfLifeMs: number): number {
+  return Math.pow(0.5, ageMs / halfLifeMs);
 }
 
 export interface VoteEventPoint {
@@ -103,8 +108,11 @@ export interface VoteEventPoint {
 }
 
 // 事件流 → 走势序列：按时间排序，累计加权净票，返回每个时间点的等级。
-// 用滑动窗口（30 天）逐点推进，均摊 O(n)。
-export function levelSeries(events: VoteEventPoint[]): { t: number; level: number }[] {
+// 用滑动窗口（30 天）逐点推进，均摊 O(n)。半衰期由调用方传入。
+export function levelSeries(
+  events: VoteEventPoint[],
+  halfLifeMs: number,
+): { t: number; level: number }[] {
   const sorted = [...events].sort((a, b) => a.t - b.t);
   const points: { t: number; level: number }[] = [];
   let upW = 0;
@@ -116,13 +124,13 @@ export function levelSeries(events: VoteEventPoint[]): { t: number; level: numbe
   for (const e of sorted) {
     if (lastT >= 0 && e.t > lastT) {
       // 所有活跃票统一随时间衰减
-      const w = voteWeight(e.t - lastT);
+      const w = voteWeight(e.t - lastT, halfLifeMs);
       upW *= w;
       downW *= w;
     }
     // 移除超出 30 天窗口的旧票
     while (head < active.length && e.t - active[head].t > VOTE_WINDOW_MS) {
-      const w = voteWeight(e.t - active[head].t);
+      const w = voteWeight(e.t - active[head].t, halfLifeMs);
       if (active[head].d === "up") upW -= w;
       else downW -= w;
       head += 1;

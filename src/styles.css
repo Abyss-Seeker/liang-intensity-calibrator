@@ -978,6 +978,100 @@ h1 {
   transform: translateY(0);
 }
 
+.vote-settings {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.vote-settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  list-style: none;
+  user-select: none;
+}
+
+.vote-settings-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.vote-settings-current {
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.vote-settings-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.vote-settings-hint {
+  margin: 10px 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+}
+
+.vote-settings-row {
+  display: flex;
+  gap: 8px;
+}
+
+.vote-settings-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 7px;
+  color: var(--ink);
+  background: transparent;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vote-settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.vote-settings-save {
+  padding: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  transition: background 120ms ease;
+}
+
+.vote-settings-save:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.vote-settings-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.vote-settings-status.is-error {
+  color: var(--accent);
+}
+
 @media (max-width: 700px) {
   .vote-panel {
     margin-top: 10px;
