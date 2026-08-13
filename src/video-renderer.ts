@@ -139,7 +139,8 @@ export function createEvolutionVideoRenderer(
     };
 
     const onSeeked = (): void => {
-      // seeked 已触发但没到位（罕见），且有重试额度 → 再 seek 一次
+      // 先立即画当前帧（拖动跟手的关键），再决定是否重试/追最新
+      drawNow();
       if (
         Math.abs(video.currentTime - target) >= 0.001 &&
         seekRetries < SEEK_RETRY
