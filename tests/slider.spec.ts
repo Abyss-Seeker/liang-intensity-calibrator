@@ -39,7 +39,7 @@ test("页面包含完整的 31 级控制与六个命名节点", async ({ page })
   ]);
 });
 
-test("六个里程碑同步更新文字、等级与 Canvas 描述", async ({ page }) => {
+test("六个里程碑同步更新文字、等级与人像描述", async ({ page }) => {
   for (const [level, stage] of milestones) {
     await setSliderLevel(page, level);
     await expect(page.locator(".stage-name")).toHaveText(stage);
@@ -64,10 +64,12 @@ test("键盘可以把滑杆移动到梁祖", async ({ page }) => {
 });
 
 test("Canvas 已完成实际绘制", async ({ page }) => {
-  const dimensions = await page.locator(".portrait-canvas").evaluate((element) => {
-    const canvas = element as HTMLCanvasElement;
-    return { width: canvas.width, height: canvas.height };
-  });
+  const dimensions = await page
+    .locator(".portrait-canvas")
+    .evaluate((element) => {
+      const canvas = element as HTMLCanvasElement;
+      return { width: canvas.width, height: canvas.height };
+    });
 
   expect(dimensions.width).toBeGreaterThan(300);
   expect(dimensions.height).toBeGreaterThan(300);
@@ -102,6 +104,9 @@ test("连续滑动位置会定位到对应视频画面", async ({ page }) => {
     const media = element as HTMLVideoElement;
     return { currentTime: media.currentTime, duration: media.duration };
   });
+
+  expect(timing.duration).toBeGreaterThan(0);
+  expect(timing.currentTime).toBeGreaterThan(0);
   expect(timing.currentTime).toBeCloseTo((12.35 / 30) * timing.duration, 1);
 });
 

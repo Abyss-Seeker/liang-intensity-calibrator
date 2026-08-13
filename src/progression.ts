@@ -38,37 +38,58 @@ export function getProgression(rawLevel: number): ProgressionState {
   };
 }
 
-// 社区投票 → 等级映射（流量自适应）。
-// 用平方根压缩：净票越少、每票影响力越大，随净票增加逐渐放缓，
-// 但累计仍能到达两个极端（0 级「小难梁」/ 30 级「梁祖」）。
-// 时间衰减在 worker 端完成（按天加权），前端拿到的是加权后的 net。
+// 社区投票 → 等级映射。
+// 等级 = 方向(净票符号) × 强度(净票规模) × 共识度(少数方占比 + 样本因子)。
+// 时间衰减在 worker 端完成（按票加权），前端拿到的是加权后的 up/down。
 export const COMMUNITY_BASE_LEVEL = 15;
-export const VOTE_FULL_NET = 20; // 20 净票满级
+export const VOTE_FULL_NET = 20; // 20 净票满级（强度维度）
+export const CONSENSUS_FLOOR = 0.1; // 共识度下限：对半附近每票仍有微弱影响（无死区）
+export const CONSENSUS_R_FULL = 0.1; // 满级容忍带：少数方占比 ≤10%（即 9:1 以上）即满级
+export const CONSENSUS_N_FULL = 20; // 样本满级门槛：总票数 ≥20 才精确满级
 
-export function levelFromNet(net: number): number {
+// 共识度：少数方占比容忍带 × 样本因子，输出 0~1，无死区。
+// 反对 ≤10%（9:1 以上）→ 满分；对半 → 下限 0.1；总票数 ≥20 → 样本因子 1（满级可达）。
+export function consensusFactor(up: number, down: number): number {
+  const n = up + down;
+  if (n <= 0) return 0;
+  const r = Math.min(up, down) / n; // 少数方占比 0~0.5
+  const raw = (0.5 - r) / (0.5 - CONSENSUS_R_FULL); // r=0.1 满分，r=0.5 对半=0
+  const floored = Math.max(raw, CONSENSUS_FLOOR);
+  const capped = Math.min(floored, 1);
+  const sample = Math.min(1, n / CONSENSUS_N_FULL);
+  return capped * sample;
+}
+
+// 由加权票数计算等级：方向(净票符号) × 强度(净票规模) × 共识度(多数方占比)。
+export function levelFromTally(up: number, down: number): number {
+  const net = up - down;
   if (net === 0) return COMMUNITY_BASE_LEVEL;
-  const magnitude = Math.min(
+  const strength = Math.min(
     1,
     Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET),
   );
+  const consensus = consensusFactor(up, down);
   return clampPosition(
-    COMMUNITY_BASE_LEVEL + COMMUNITY_BASE_LEVEL * magnitude * Math.sign(net),
+    COMMUNITY_BASE_LEVEL +
+      COMMUNITY_BASE_LEVEL * strength * consensus * Math.sign(net),
   );
 }
 
 export function communityLevelFromTally(up: number, down: number): number {
-  return levelFromNet(up - down);
+  return levelFromTally(up, down);
 }
 
-// 单票影响力：在当前加权净票下，再投一票（顺风方向）能改变约多少级。
-export function singleVoteImpact(net: number): number {
-  const current = levelFromNet(net);
-  const next = net >= 0 ? levelFromNet(net + 1) : levelFromNet(net - 1);
+// 单票影响力：顺着当前净票方向再投一票，等级约变化多少。
+export function singleVoteImpact(up: number, down: number): number {
+  const net = up - down;
+  const current = levelFromTally(up, down);
+  const next =
+    net >= 0 ? levelFromTally(up + 1, down) : levelFromTally(up, down + 1);
   return Math.abs(next - current);
 }
 
 // —— 时间衰减（与 worker 端保持一致）——
-export const VOTE_HALF_LIFE_MS = 7 * 24 * 3600 * 1000; // 指数半衰期 7 天
+export const VOTE_HALF_LIFE_MS = 5 * 24 * 3600 * 1000; // 指数半衰期 5 天
 export const VOTE_WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
 
 // 单票在 age 毫秒前的权重（指数半衰期）
@@ -86,7 +107,8 @@ export interface VoteEventPoint {
 export function levelSeries(events: VoteEventPoint[]): { t: number; level: number }[] {
   const sorted = [...events].sort((a, b) => a.t - b.t);
   const points: { t: number; level: number }[] = [];
-  let net = 0;
+  let upW = 0;
+  let downW = 0;
   let lastT = -1;
   const active: { t: number; d: "up" | "down" }[] = [];
   let head = 0;
@@ -94,18 +116,23 @@ export function levelSeries(events: VoteEventPoint[]): { t: number; level: numbe
   for (const e of sorted) {
     if (lastT >= 0 && e.t > lastT) {
       // 所有活跃票统一随时间衰减
-      net *= voteWeight(e.t - lastT);
+      const w = voteWeight(e.t - lastT);
+      upW *= w;
+      downW *= w;
     }
     // 移除超出 30 天窗口的旧票
     while (head < active.length && e.t - active[head].t > VOTE_WINDOW_MS) {
-      net -= (active[head].d === "up" ? 1 : -1) * voteWeight(e.t - active[head].t);
+      const w = voteWeight(e.t - active[head].t);
+      if (active[head].d === "up") upW -= w;
+      else downW -= w;
       head += 1;
     }
     // 加入新票（age = 0，权重 = 1）
-    net += e.d === "up" ? 1 : -1;
+    if (e.d === "up") upW += 1;
+    else downW += 1;
     active.push({ t: e.t, d: e.d });
     lastT = e.t;
-    points.push({ t: e.t, level: levelFromNet(net) });
+    points.push({ t: e.t, level: levelFromTally(upW, downW) });
   }
   return points;
 }

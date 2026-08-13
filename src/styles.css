@@ -210,7 +210,6 @@ h1 {
   height: 100%;
   background:
     radial-gradient(circle at 50% 38%, #f7f7f5, #cfd1cf 70%);
-  object-fit: cover;
 }
 
 .evolution-video {
@@ -521,7 +520,16 @@ h1 {
 .footer-links {
   display: flex;
   justify-self: center;
-  gap: 14px;
+  gap: 16px;
+}
+
+.footer-group {
+  display: flex;
+  gap: 8px;
+}
+
+.footer-brand {
+  color: var(--muted);
 }
 
 .footer-links a {
@@ -808,10 +816,9 @@ h1 {
 
 .chart-hover-line {
   display: none;
-  stroke: var(--accent);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.7;
+  stroke: var(--ink);
+  stroke-width: 2;
+  opacity: 1;
   vector-effect: non-scaling-stroke;
 }
 

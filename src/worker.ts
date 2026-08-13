@@ -23,7 +23,10 @@ interface VoteEvent {
 
 const BASE_LEVEL = 15;
 const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
-const HALF_LIFE_MS = 7 * 24 * 3600 * 1000; // 指数半衰期 7 天
+const CONSENSUS_FLOOR = 0.1; // 共识度下限：对半附近每票仍有微弱影响（无死区）
+const CONSENSUS_R_FULL = 0.1; // 满级容忍带：少数方占比 ≤10%（即 9:1 以上）即满级
+const CONSENSUS_N_FULL = 20; // 样本满级门槛：总票数 ≥20 才精确满级
+const HALF_LIFE_MS = 5 * 24 * 3600 * 1000; // 指数半衰期 5 天
 const WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
 const EVENTS_KEY = "events";
 const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
@@ -39,15 +42,31 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function levelFromNet(net: number): number {
+// 共识度：少数方占比容忍带 × 样本因子，输出 0~1，无死区。
+// 反对 ≤10%（9:1 以上）→ 满分；对半 → 下限 0.1；总票数 ≥20 → 样本因子 1（满级可达）。
+function consensusFactor(up: number, down: number): number {
+  const n = up + down;
+  if (n <= 0) return 0;
+  const r = Math.min(up, down) / n; // 少数方占比 0~0.5
+  const raw = (0.5 - r) / (0.5 - CONSENSUS_R_FULL);
+  const floored = Math.max(raw, CONSENSUS_FLOOR);
+  const capped = Math.min(floored, 1);
+  const sample = Math.min(1, n / CONSENSUS_N_FULL);
+  return capped * sample;
+}
+
+// 由加权票数计算等级：方向(净票符号) × 强度(净票规模) × 共识度(多数方占比)。
+function levelFromTally(upW: number, downW: number): number {
+  const net = upW - downW;
   if (net === 0) return BASE_LEVEL;
-  const magnitude = Math.min(
-    1,
-    Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET),
-  );
+  const strength = Math.min(1, Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET));
+  const consensus = consensusFactor(upW, downW);
   return Math.min(
     30,
-    Math.max(0, BASE_LEVEL + BASE_LEVEL * magnitude * Math.sign(net)),
+    Math.max(
+      0,
+      BASE_LEVEL + BASE_LEVEL * strength * consensus * Math.sign(net),
+    ),
   );
 }
 
@@ -71,28 +90,31 @@ async function readEvents(env: Env): Promise<VoteEvent[]> {
   }
 }
 
-// 计算当前加权净票（时间衰减后），供等级映射使用。
+// 计算当前加权票数与等级（时间衰减后），供等级映射使用。
 function computeTally(events: VoteEvent[], now: number) {
   let up = 0;
   let down = 0;
-  let weightedNet = 0;
+  let upW = 0;
+  let downW = 0;
   for (const e of events) {
     const age = now - e.t;
     if (age < 0 || age > WINDOW_MS) continue;
     const w = voteWeight(age);
     if (e.d === "up") {
       up += 1;
-      weightedNet += w;
+      upW += w;
     } else {
       down += 1;
-      weightedNet -= w;
+      downW += w;
     }
   }
   return {
     up,
     down,
-    net: weightedNet,
-    level: levelFromNet(weightedNet),
+    net: upW - downW,
+    weightedUp: upW,
+    weightedDown: downW,
+    level: levelFromTally(upW, downW),
   };
 }
 

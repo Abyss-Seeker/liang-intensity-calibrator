@@ -8,6 +8,8 @@ export interface VoteTally {
   down: number;
   net: number;
   level: number;
+  weightedUp: number;
+  weightedDown: number;
   events: VoteEvent[];
   voted: boolean;
   votedDirection: "up" | "down" | null;
@@ -30,6 +32,8 @@ export async function fetchVotes(): Promise<VoteTally> {
     down: data.down ?? 0,
     net: data.net ?? 0,
     level: data.level ?? 15,
+    weightedUp: data.weightedUp ?? data.up ?? 0,
+    weightedDown: data.weightedDown ?? data.down ?? 0,
     events: data.events ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,
@@ -51,6 +55,8 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
     down: data.down ?? 0,
     net: data.net ?? 0,
     level: data.level ?? 15,
+    weightedUp: data.weightedUp ?? data.up ?? 0,
+    weightedDown: data.weightedDown ?? data.down ?? 0,
     events: data.events ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,

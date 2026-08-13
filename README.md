@@ -8,11 +8,11 @@
 
 ## 有什么
 
-- 241 帧连续人像变化，滑杆支持 0.01 级精度
+- 241 张连续 WebP 人像帧，滑杆支持 0.01 级精度
 - 六个状态：小难梁、牢梁、梁子、梁圣、梁神、梁祖
 - 支持鼠标、触摸和键盘操作
 - 适配桌面与手机浏览器
-- WebM 与 MP4 双格式回退
+- 独立图片帧按需加载，失败时回退到 PNG 关键帧
 
 ## 本地运行
 
@@ -49,7 +49,13 @@ RIFE_BIN=/绝对路径/rife-ncnn-vulkan \
   bash scripts/video/build-full-video.sh
 ```
 
-生成结果位于 `public/video`，网页会优先加载 WebM，并在不支持时回退到 MP4。
+生成结果位于 `public/video`。网页显示使用从 MP4 导出的独立 WebP 帧，避免移动端视频 seek 卡帧：
+
+```bash
+bash scripts/video/build-web-frames.sh
+```
+
+WebP 结果位于 `public/evolution-frames`；单帧加载失败时会回退到 `public/frames` 中最接近的 PNG 关键帧。
 
 ## 发布
 
@@ -57,4 +63,4 @@ RIFE_BIN=/绝对路径/rife-ncnn-vulkan \
 
 ## 素材说明
 
-`public/frames` 与 `public/video` 内的人像素材用于本项目的趣味化演示。复用或二次发布前，请确认你拥有相关肖像与素材的使用权。
+`public/frames`、`public/evolution-frames` 与 `public/video` 内的人像素材用于本项目的趣味化演示。复用或二次发布前，请确认你拥有相关肖像与素材的使用权。

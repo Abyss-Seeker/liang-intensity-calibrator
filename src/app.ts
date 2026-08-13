@@ -1,7 +1,6 @@
 import {
   clampPosition,
   getProgression,
-  levelFromNet,
   levelSeries,
   MAX_LEVEL,
   singleVoteImpact,
@@ -10,14 +9,14 @@ import {
 import type { VoteDirection, VoteEvent } from "./vote";
 
 export interface AppController {
-  readonly canvas: HTMLCanvasElement;
+  readonly portrait: HTMLCanvasElement;
   readonly slider: HTMLInputElement;
   readonly level: number;
   setLevel(level: number): void;
   setLoading(loaded: number, total: number): void;
   setReady(): void;
   setError(message: string): void;
-  setVotes(up: number, down: number, net: number): void;
+  setVotes(up: number, down: number, level: number, weightedUp: number, weightedDown: number): void;
   setVoteState(state: VoteState, message?: string): void;
   setEvents(events: VoteEvent[]): void;
   onVote(handler: VoteHandler): void;
@@ -209,10 +208,8 @@ function renderChart(
     );
   }
 
-  // hover 竖线（跟随鼠标）
-  parts.push(`<line class="chart-hover-line" x1="0" y1="${CHART_PAD.top}" x2="0" y2="${
-    h - CHART_PAD.bottom
-  }" />`);
+  // hover 竖线（跟随鼠标，贯穿整个图表）
+  parts.push(`<line class="chart-hover-line" x1="0" y1="0" x2="0" y2="${h}" />`);
   parts.push(`<circle class="chart-hover-dot" cx="0" cy="0" r="3.5" />`);
 
   svg.innerHTML = parts.join("");
@@ -335,8 +332,12 @@ export function mountApp(
       <footer class="footer-note">
         <span>31 级连续进化</span>
         <span class="footer-links">
-          <a href="https://github.com/Lichtspektrum/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">原项目</a>
-          <a href="https://github.com/Abyss-Seeker/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">本项目</a>
+          <span class="footer-group">
+            <span class="footer-brand">GitHub ·</span>
+            <a href="https://github.com/Lichtspektrum/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">原项目</a>
+            <a href="https://github.com/Abyss-Seeker/liang-intensity-calibrator" target="_blank" rel="noopener noreferrer">本项目</a>
+          </span>
+          <a class="footer-bili" href="https://www.bilibili.com/video/BV1mVg76XEei/" target="_blank" rel="noopener noreferrer">Bilibili视频</a>
         </span>
         <span>正脸识别协议：已启用</span>
       </footer>
@@ -344,7 +345,7 @@ export function mountApp(
   `;
 
   const experience = root.querySelector<HTMLElement>(".experience")!;
-  const canvas = root.querySelector<HTMLCanvasElement>(".portrait-canvas")!;
+  const portrait = root.querySelector<HTMLCanvasElement>(".portrait-canvas")!;
   const slider = root.querySelector<HTMLInputElement>("#strength-slider")!;
   const output = root.querySelector<HTMLOutputElement>(".level-output")!;
   const stageName = root.querySelector<HTMLElement>(".stage-name")!;
@@ -394,7 +395,7 @@ export function mountApp(
     stageName.textContent = state.stage;
     stageGhost.textContent = state.stage;
     stageIndex.textContent = `阶段 ${String(state.stageIndex + 1).padStart(2, "0")} / 06`;
-    canvas.setAttribute("aria-label", `当前形态：${state.stage}`);
+    portrait.setAttribute("aria-label", `当前形态：${state.stage}`);
     experience.dataset.stage = String(state.stageIndex);
     const strength = position / MAX_LEVEL;
     experience.style.setProperty("--strength", String(strength));
@@ -418,17 +419,22 @@ export function mountApp(
     chartPoints = renderChart(chartSvg, currentEvents, currentRange);
   };
 
-  const setVotes = (up: number, down: number, net: number): void => {
+  const setVotes = (
+    up: number,
+    down: number,
+    level: number,
+    weightedUp: number,
+    weightedDown: number,
+  ): void => {
     upCount.textContent = String(up);
     downCount.textContent = String(down);
-    const level = levelFromNet(net);
     const state = getProgression(level);
-    voteCommunityLevel.textContent = `${state.stage} · ${state.level} 级`;
+    voteCommunityLevel.textContent = `${state.stage} · ${level.toFixed(4)} 级`;
     chartCurrent.textContent = `${state.stage} ${state.level} 级`;
 
-    const impact = singleVoteImpact(net);
+    const impact = singleVoteImpact(weightedUp, weightedDown);
     voteImpactValue.textContent =
-      impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(1)} 级`;
+      impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(2)} 级`;
   };
 
   const setEvents = (events: VoteEvent[]): void => {
@@ -489,7 +495,15 @@ export function mountApp(
     const px = event.clientX - rect.left;
     const py = event.clientY - rect.top;
 
-    // 找 x 最近的采样点
+    // 十字竖线：始终跟随鼠标 x、贯穿绘图区，方便对齐时间轴
+    const line = chartSvg.querySelector<SVGLineElement>(".chart-hover-line");
+    if (line) {
+      line.style.display = "inline";
+      line.setAttribute("x1", String(px));
+      line.setAttribute("x2", String(px));
+    }
+
+    // 找 x 最近的采样点（用于圆点与数据提示）
     let best = chartPoints[0];
     let bestDist = Infinity;
     for (const p of chartPoints) {
@@ -499,21 +513,17 @@ export function mountApp(
         best = p;
       }
     }
-    // 距离太远（比如空白区域）则隐藏
+
+    const dot = chartSvg.querySelector<SVGCircleElement>(".chart-hover-dot");
+    // 距离数据点太远（如空白区）时，只保留竖线、隐藏数据提示
     if (bestDist > 60) {
-      hideTooltip();
+      if (dot) dot.style.display = "none";
+      chartTooltip.hidden = true;
       return;
     }
 
-    const line = chartSvg.querySelector<SVGLineElement>(".chart-hover-line");
-    const dot = chartSvg.querySelector<SVGCircleElement>(".chart-hover-dot");
-    if (line) {
-      line.style.display = "";
-      line.setAttribute("x1", String(best.x));
-      line.setAttribute("x2", String(best.x));
-    }
     if (dot) {
-      dot.style.display = "";
+      dot.style.display = "inline";
       dot.setAttribute("cx", String(best.x));
       dot.setAttribute("cy", String(best.y));
     }
@@ -549,7 +559,7 @@ export function mountApp(
   setLevel(0);
 
   return {
-    canvas,
+    portrait,
     slider,
     get level() {
       return currentPosition;

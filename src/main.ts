@@ -4,12 +4,13 @@ import { type AppController, mountApp } from "./app";
 import {
   createEvolutionVideoRenderer,
   type EvolutionVideoRenderer,
+  VideoLoadTimeoutError,
 } from "./video-renderer";
 import {
   castVote,
   fetchVotes,
   type VoteDirection,
-  type VoteEvent,
+  type VoteTally,
 } from "./vote";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -22,21 +23,44 @@ let controller: AppController | null = null;
 let renderer: EvolutionVideoRenderer | null = null;
 let communityLevel = 15;
 let animFrame = 0;
+let userAdjustedLevel = false;
+const FRAME_TIMEOUT_RELOAD_KEY = "liang-frame-timeout-reloaded";
+
+const recoverFromFrameError = (error: unknown): void => {
+  let alreadyReloaded = true;
+  try {
+    alreadyReloaded = sessionStorage.getItem(FRAME_TIMEOUT_RELOAD_KEY) === "1";
+  } catch {
+    // Storage can be unavailable in privacy-restricted WebViews. Avoid a
+    // reload loop when the guard cannot be persisted.
+  }
+
+  if (error instanceof VideoLoadTimeoutError && !alreadyReloaded) {
+    try {
+      sessionStorage.setItem(FRAME_TIMEOUT_RELOAD_KEY, "1");
+    } catch {
+      return controller?.setError("图像加载超时，请刷新重试");
+    }
+    window.location.reload();
+    return;
+  }
+  controller?.setError("图像加载失败，请刷新重试");
+};
 
 const requestDraw = (level: number): void => {
   renderer?.render(level);
 };
 
-const applyTally = (
-  up: number,
-  down: number,
-  net: number,
-  level: number,
-  events: VoteEvent[],
-): void => {
-  communityLevel = level;
-  controller?.setVotes(up, down, net);
-  controller?.setEvents(events);
+const applyTally = (tally: VoteTally): void => {
+  communityLevel = tally.level;
+  controller?.setVotes(
+    tally.up,
+    tally.down,
+    tally.level,
+    tally.weightedUp,
+    tally.weightedDown,
+  );
+  controller?.setEvents(tally.events);
 };
 
 const animateToLevel = (target: number): void => {
@@ -50,7 +74,6 @@ const animateToLevel = (target: number): void => {
     const eased = 1 - Math.pow(1 - t, 3);
     const level = start + (target - start) * eased;
     controller?.setLevel(level);
-    requestDraw(level);
     if (t < 1) {
       animFrame = requestAnimationFrame(step);
     }
@@ -61,7 +84,10 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally.up, tally.down, tally.net, tally.level, tally.events);
+    applyTally(tally);
+    if (!userAdjustedLevel && controller && !controller.slider.disabled) {
+      controller.setLevel(tally.level);
+    }
     if (tally.voted) {
       controller?.setVoteState(
         "voted",
@@ -95,14 +121,18 @@ function showInAppBrowserHint(): void {
 }
 
 controller = mountApp(app, requestDraw);
-renderer = createEvolutionVideoRenderer(controller.canvas);
+renderer = createEvolutionVideoRenderer(controller.portrait);
+controller.setLevel(communityLevel);
 controller.setLoading(0, 1);
+controller.slider.addEventListener("input", () => {
+  userAdjustedLevel = true;
+});
 
 controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.up, result.down, result.net, result.level, result.events);
+    applyTally(result);
     if (result.reason) {
       controller?.setVoteState(
         "voted",
@@ -124,22 +154,26 @@ controller.onShowCommunity(() => {
   animateToLevel(communityLevel);
 });
 
-// 视频加载 与 社区票数请求 并行，缩短首屏时间（原先串行：等视频 loadeddata 后才请求票数）。
-const videoReady = renderer.load();
-const votesReady = syncVotes();
+// The portrait is the primary interaction and must never wait for the community
+// API. A slow or unavailable vote request only affects the vote panel.
+const framesReady = renderer.load();
+void syncVotes();
 
-Promise.all([videoReady, votesReady])
+framesReady
   .then(() => {
-    // 两者都就绪后，渲染社区等级对应的帧；等目标帧真正画出来再撤掉加载层，
-    // 避免出现"分数/样式都到位但图片卡在第一帧"的情况。
+    // A successful load ends the one-reload recovery window. A later genuine
+    // timeout may therefore recover in the same way again.
+    try {
+      sessionStorage.removeItem(FRAME_TIMEOUT_RELOAD_KEY);
+    } catch {
+      // The app remains usable when session storage is unavailable.
+    }
+    // Render the best community level available at this moment. If the API is
+    // still pending, the neutral level is used and the slider is enabled.
+    controller?.setReady();
     controller?.setLevel(communityLevel);
-    renderer?.render(communityLevel, () => {
-      controller?.setReady();
-    });
   })
-  .catch(() => {
-    controller?.setError("图像加载失败，请刷新重试");
-  });
+  .catch(recoverFromFrameError);
 
 if (isInAppBrowser()) {
   showInAppBrowserHint();
