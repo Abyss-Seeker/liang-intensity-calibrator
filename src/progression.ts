@@ -146,7 +146,7 @@ export function levelSeries(
 }
 
 // 从事件流 + 本地半衰期直接算加权票数与等级（前端本地重算用，
-// 让"社区评定/单票影响力"跟随用户自己设定的半衰期，而非后端全局值）。
+// 让"社区评分/单票影响力"跟随用户自己设定的半衰期，而非后端全局值）。
 export function tallyFromEvents(
   events: VoteEventPoint[],
   halfLifeMs: number,

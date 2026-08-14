@@ -331,7 +331,7 @@ export function mountApp(
 
         <div class="vote-meta">
           <p class="vote-community">
-            社区评定：<strong class="vote-community-level">—</strong>
+            社区评分：<strong class="vote-community-level">—</strong>
           </p>
           <p class="vote-impact">
             单票影响力 <strong class="vote-impact-value">—</strong>

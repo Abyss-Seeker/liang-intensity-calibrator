@@ -89,7 +89,7 @@ const requestDraw = (level: number): void => {
   renderer?.render(level);
 };
 
-// 用本地半衰期重算等级 + 更新 UI（社区评定/单票影响力/走势图），
+// 用本地半衰期重算等级 + 更新 UI（社区评分/单票影响力/走势图），
 // 让半衰期只影响本机显示，不依赖后端全局值。
 const recalcLocalTally = (): void => {
   const halfLifeMs = halfLifeMsFromHours(localHalfLifeHours);
