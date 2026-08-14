@@ -482,8 +482,11 @@ export function mountApp(
     chartCurrent.textContent = `${state.stage} ${state.level} 级`;
 
     const impact = singleVoteImpact(weightedUp, weightedDown);
-    voteImpactValue.textContent =
-      impact <= 0.005 ? "已达极限" : `≈ ${impact.toFixed(2)} 级`;
+    // 永不显示「已达极限」：单票影响再小也如实展示。
+    // 样本饱和时 1/n 效应会让数字趋近 0，但那是真实的边际影响，不该用文案掩盖。
+    const impactText =
+      impact >= 0.1 ? impact.toFixed(2) : impact.toFixed(4);
+    voteImpactValue.textContent = `≈ ${impactText} 级`;
   };
 
   const setEvents = (events: VoteEvent[]): void => {
