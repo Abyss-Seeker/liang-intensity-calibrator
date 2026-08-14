@@ -337,7 +337,7 @@ export function mountApp(
         <details class="vote-settings">
           <summary class="vote-settings-toggle">半衰期设置 <span class="vote-settings-current"></span></summary>
           <div class="vote-settings-body">
-            <p class="vote-settings-hint">票的权重随时间的半衰期（小时），越小旧票淡化越快。默认 120（5 天），仅本机生效、不影响他人。</p>
+            <p class="vote-settings-hint">票的权重随时间的半衰期（小时），越小旧票淡化越快。默认 18 小时，仅本机生效、不影响他人。</p>
             <div class="vote-settings-row">
               <input
                 class="vote-settings-input"

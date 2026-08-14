@@ -89,7 +89,7 @@ export function singleVoteImpact(up: number, down: number): number {
 }
 
 // —— 时间衰减（与 worker 端保持一致）——
-export const DEFAULT_HALF_LIFE_HOURS = 120; // 默认半衰期 120 小时（5 天）
+export const DEFAULT_HALF_LIFE_HOURS = 18; // 默认半衰期 18 小时（一天能变几个称号，缩短更跟手）
 export const VOTE_WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
 
 // 半衰期（小时）→ 毫秒
