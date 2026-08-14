@@ -339,7 +339,7 @@ export function mountApp(
         </div>
 
         <button class="vote-show-community" type="button" data-action="show-community">
-          查看社区评价
+          查看社区评分
         </button>
 
         <details class="vote-settings">
