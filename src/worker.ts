@@ -179,12 +179,33 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
 
   const now = Date.now();
   const events = await readEvents(env);
+  const snapshot = events.slice(); // KV 中真实存在的事件（不含本次失败票）
   events.push({ t: now, d: direction });
   const trimmed = events.slice(-EVENTS_MAX);
-  await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
-  await env.VOTES.put(votedKey, direction, {
-    expirationTtl: voteTtlSeconds(resetAt, now),
-  });
+
+  // KV 免费版写入配额（1000 次/天）耗尽时 put 会抛错。不 catch 的话 Worker
+  // 会返回 Cloudflare 默认 500 错误页，前端拿不到任何可读信息；这里统一
+  // 转成 503 + code 的 JSON，并打出日志方便在 Workers Logs 里定位。
+  try {
+    await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
+    await env.VOTES.put(votedKey, direction, {
+      expirationTtl: voteTtlSeconds(resetAt, now),
+    });
+  } catch (error) {
+    console.error("[vote] KV 写入失败（疑似每日写入配额耗尽）", error);
+    return json(
+      {
+        code: "kv_quota",
+        reason:
+          "今天的投票人数太火爆，把免费额度冲爆啦。站长正在急头白脸加额度中，稍后再来试试吧！",
+        ...computeTally(snapshot, now),
+        events: snapshot,
+        voted: false,
+        votedDirection: null,
+      },
+      503,
+    );
+  }
 
   const tally = computeTally(trimmed, now);
   return json({

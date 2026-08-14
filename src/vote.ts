@@ -19,6 +19,15 @@ export type VoteDirection = "up" | "down";
 
 export interface VoteResponse extends VoteTally {
   reason?: string;
+  code?: string;
+}
+
+/** KV 写入配额耗尽（免费版 1000 次/天）时的专属错误，前端据此弹 banner */
+export class VoteQuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VoteQuotaExceededError";
+  }
 }
 
 export async function fetchVotes(): Promise<VoteTally> {
@@ -57,8 +66,19 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ direction, resetAt: nextMidnight.getTime() }),
   });
-  const data = (await response.json()) as VoteResponse;
+  let data: VoteResponse;
+  try {
+    data = (await response.json()) as VoteResponse;
+  } catch {
+    throw new Error("投票服务暂时异常，请稍后重试");
+  }
   if (!response.ok) {
+    // 后端识别到 KV 写入配额耗尽（503 + code），抛出专属错误让页面弹 banner
+    if (response.status === 503 && data.code === "kv_quota") {
+      throw new VoteQuotaExceededError(
+        data.reason ?? "今天的投票额度用完了，站长正在加急扩容",
+      );
+    }
     throw new Error(data.reason ?? "投票失败");
   }
   return {

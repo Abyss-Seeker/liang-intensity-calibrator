@@ -1,6 +1,7 @@
 .worktrees/
 node_modules/
 dist/
+dist-bak-*/
 dist-pages/
 test-results/
 playwright-report/

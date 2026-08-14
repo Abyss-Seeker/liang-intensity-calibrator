@@ -16,6 +16,7 @@ import {
   fetchVotes,
   type VoteDirection,
   type VoteEvent,
+  VoteQuotaExceededError,
 } from "./vote";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -192,8 +193,14 @@ controller.onVote(async (direction: VoteDirection) => {
         `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
       );
     }
-  } catch {
-    controller?.setVoteState("error", "投票失败，请重试");
+  } catch (error) {
+    if (error instanceof VoteQuotaExceededError) {
+      // 免费 KV 写入配额耗尽：投票核心功能瘫痪，弹 banner 让访客知道是限额
+      controller?.setVoteState("error", "今日投票额度已用尽");
+      controller?.showQuotaBanner(error.message);
+    } else {
+      controller?.setVoteState("error", "投票失败，请重试");
+    }
   }
 });
 

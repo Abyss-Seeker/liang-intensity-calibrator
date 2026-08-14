@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error generated worker is plain JavaScript
 import worker from "../dist/server/index.js";
 
-function makeEnv() {
+function makeEnv(opts?: { failPuts?: boolean }) {
   const store = new Map<string, string | null>();
   const VOTES = {
     async get(key: string) {
       return store.get(key) ?? null;
     },
     async put(key: string, value: string) {
+      if (opts?.failPuts) {
+        throw new Error("KV write quota exceeded");
+      }
       store.set(key, value);
     },
   };
@@ -88,6 +91,18 @@ describe("vote api", () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("sideways"), env);
     expect(response.status).toBe(400);
+  });
+
+  it("KV 写入失败（配额耗尽）时返回 503 + kv_quota 标识，而非 500 错误页", async () => {
+    const { env } = makeEnv({ failPuts: true });
+    const response = await worker.fetch(postVote("up"), env);
+    expect(response.status).toBe(503);
+    const data = await response.json();
+    expect(data.code).toBe("kv_quota");
+    expect(data.reason).toContain("急头白脸");
+    // 未记录事件，前端可据此弹 banner
+    expect(data.up).toBe(0);
+    expect(data.events).toEqual([]);
   });
 
   it("未注册 /api/settings 端点（半衰期改为前端本地）", async () => {

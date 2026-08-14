@@ -23,6 +23,7 @@ export interface AppController {
   setEvents(events: VoteEvent[]): void;
   setHalfLife(hours: number): void;
   setHalfLifeStatus(message: string, isError?: boolean): void;
+  showQuotaBanner(message: string): void;
   onVote(handler: VoteHandler): void;
   onShowCommunity(handler: () => void): void;
   onSaveHalfLife(handler: (hours: number) => void): void;
@@ -539,6 +540,28 @@ export function mountApp(
     halfLifeStatus.classList.toggle("is-error", isError);
   };
 
+  // 投票写入配额耗尽时的顶部告警条（挂 document.body，避免被页面 transform 影响）
+  const showQuotaBanner = (message: string): void => {
+    let banner = document.querySelector<HTMLElement>(".quota-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "quota-banner";
+      banner.setAttribute("role", "alert");
+      const text = document.createElement("span");
+      text.className = "quota-banner-text";
+      const close = document.createElement("button");
+      close.className = "quota-banner-close";
+      close.type = "button";
+      close.setAttribute("aria-label", "关闭提示");
+      close.textContent = "×";
+      close.addEventListener("click", () => banner?.remove());
+      banner.append(text, close);
+      document.body.append(banner);
+    }
+    banner.querySelector<HTMLElement>(".quota-banner-text")!.textContent =
+      message;
+  };
+
   rangeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       currentRange = button.dataset.range as RangeKey;
@@ -661,6 +684,7 @@ export function mountApp(
     setEvents,
     setHalfLife,
     setHalfLifeStatus,
+    showQuotaBanner,
     onVote,
     onShowCommunity,
     onSaveHalfLife,
