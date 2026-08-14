@@ -913,6 +913,16 @@ h1 {
   font-weight: 700;
 }
 
+/* 数据缺口标注：限额爆了、事件未录入的时间段内的小字提示 */
+.chart-tooltip-gap {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--accent, #b5542c);
+  font-weight: 500;
+  max-width: 190px;
+  white-space: normal;
+}
+
 .vote-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

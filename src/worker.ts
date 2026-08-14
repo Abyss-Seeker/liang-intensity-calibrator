@@ -21,6 +21,46 @@ interface VoteEvent {
   d: "up" | "down";
 }
 
+// 数据缺口：某个时间段内投票因 KV 写入配额耗尽而未被记录。
+// end 为 null 表示缺口仍在进行中。reason 直接展示给访客。
+interface VoteGap {
+  start: number;
+  end: number | null;
+  reason: string;
+}
+
+// 已知事故窗口（硬编码，长期展示）。北京时间 2026-08-14 09:53 ~ 12:11
+// 之间 KV 免费版写入配额耗尽，投票全部 500，事件流未记录任何票。
+const STATIC_GAPS: VoteGap[] = [
+  {
+    start: Date.UTC(2026, 7, 14, 1, 53, 0), // 北京 09:53
+    end: Date.UTC(2026, 7, 14, 4, 11, 0), // 北京 12:11
+    reason: "网页限额爆了，数据未录入，不准确",
+  },
+];
+
+// 运行期自动收集的缺口（isolate 内存，尽力而为：CF 会复用 isolate，
+// 同一时段内的请求大概率共享；跨 isolate/重启会丢失，但静态窗口兜底）。
+let runtimeGaps: VoteGap[] = [];
+
+// 投票成功/失败时更新运行期缺口：失败开缺口，成功闭缺口。
+function trackGap(now: number, failed: boolean): void {
+  const open = runtimeGaps.find((g) => g.end === null);
+  if (failed) {
+    if (!open) {
+      runtimeGaps.push({ start: now, end: null, reason: "网页限额爆了，数据未录入，不准确" });
+    }
+    return;
+  }
+  if (open) {
+    open.end = now;
+  }
+}
+
+function visibleGaps(): VoteGap[] {
+  return [...STATIC_GAPS, ...runtimeGaps];
+}
+
 const BASE_LEVEL = 15;
 const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
 const CONSENSUS_FLOOR = 0.1; // 共识度下限：对半附近每票仍有微弱影响（无死区）
@@ -139,6 +179,7 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     return json({
       ...tally,
       events,
+      gaps: visibleGaps(),
       voted: Boolean(alreadyVoted),
       votedDirection: alreadyVoted ?? null,
     });
@@ -171,6 +212,7 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     return json({
       ...tally,
       events,
+      gaps: visibleGaps(),
       voted: true,
       votedDirection: alreadyVoted,
       reason: "今天已经投过票了，明天再来吧",
@@ -193,6 +235,7 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     });
   } catch (error) {
     console.error("[vote] KV 写入失败（疑似每日写入配额耗尽）", error);
+    trackGap(now, true);
     return json(
       {
         code: "kv_quota",
@@ -200,6 +243,7 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
           "今天的投票人数太火爆，把免费额度冲爆啦。站长正在急头白脸加额度中，稍后再来试试吧！",
         ...computeTally(snapshot, now),
         events: snapshot,
+        gaps: visibleGaps(),
         voted: false,
         votedDirection: null,
       },
@@ -207,10 +251,12 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  trackGap(now, false);
   const tally = computeTally(trimmed, now);
   return json({
     ...tally,
     events: trimmed,
+    gaps: visibleGaps(),
     voted: true,
     votedDirection: direction,
   });

@@ -16,6 +16,7 @@ import {
   fetchVotes,
   type VoteDirection,
   type VoteEvent,
+  type VoteGap,
   VoteQuotaExceededError,
 } from "./vote";
 
@@ -105,8 +106,9 @@ const recalcLocalTally = (): void => {
   controller?.setHalfLife(localHalfLifeHours);
 };
 
-const applyTally = (events: VoteEvent[]): void => {
+const applyTally = (events: VoteEvent[], gaps?: VoteGap[]): void => {
   currentEvents = events;
+  controller?.setGaps(gaps ?? []);
   recalcLocalTally();
 };
 
@@ -131,7 +133,7 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally.events);
+    applyTally(tally.events, tally.gaps);
     if (!userAdjustedLevel && controller && !controller.slider.disabled) {
       controller.setLevel(communityLevel);
     }
@@ -180,7 +182,7 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.events);
+    applyTally(result.events, result.gaps);
     if (result.reason) {
       controller?.setVoteState(
         "voted",

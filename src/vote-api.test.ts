@@ -105,6 +105,40 @@ describe("vote api", () => {
     expect(data.events).toEqual([]);
   });
 
+  it("GET 返回已知事故缺口（2026-08-14 限额爆了的静态窗口）", async () => {
+    const { env } = makeEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/vote"),
+      env,
+    );
+    const data = await response.json();
+    expect(Array.isArray(data.gaps)).toBe(true);
+    expect(data.gaps.length).toBeGreaterThanOrEqual(1);
+    const known = data.gaps.find((g: { reason: string }) =>
+      g.reason.includes("限额爆了"),
+    );
+    expect(known).toBeTruthy();
+    expect(known.start).toBe(Date.UTC(2026, 7, 14, 1, 53, 0)); // 北京 09:53
+    expect(known.end).toBe(Date.UTC(2026, 7, 14, 4, 11, 0)); // 北京 12:11
+  });
+
+  it("KV 写入失败后自动收集运行期缺口（同一 isolate 内 GET 可见）", async () => {
+    const { env } = makeEnv({ failPuts: true });
+    const before = await (
+      await worker.fetch(new Request("https://example.com/api/vote"), env)
+    ).json();
+    const fail = await worker.fetch(postVote("up"), env);
+    expect(fail.status).toBe(503);
+    const after = await (
+      await worker.fetch(new Request("https://example.com/api/vote"), env)
+    ).json();
+    // 失败要么新建缺口，要么延续已有的进行中缺口，绝不减少
+    expect(after.gaps.length).toBeGreaterThanOrEqual(before.gaps.length);
+    const lastGap = after.gaps[after.gaps.length - 1];
+    expect(lastGap.end).toBeNull(); // 进行中
+    expect(lastGap.reason).toContain("限额爆了");
+  });
+
   it("未注册 /api/settings 端点（半衰期改为前端本地）", async () => {
     const { env } = makeEnv();
     // 应回退到 ASSETS 静态资源（200），而非 settings JSON 处理

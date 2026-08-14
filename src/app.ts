@@ -8,7 +8,7 @@ import {
   singleVoteImpact,
   STAGES,
 } from "./progression";
-import type { VoteDirection, VoteEvent } from "./vote";
+import type { VoteDirection, VoteEvent, VoteGap } from "./vote";
 
 export interface AppController {
   readonly portrait: HTMLCanvasElement;
@@ -21,6 +21,7 @@ export interface AppController {
   setVotes(up: number, down: number, level: number, weightedUp: number, weightedDown: number): void;
   setVoteState(state: VoteState, message?: string): void;
   setEvents(events: VoteEvent[]): void;
+  setGaps(gaps: VoteGap[]): void;
   setHalfLife(hours: number): void;
   setHalfLifeStatus(message: string, isError?: boolean): void;
   showQuotaBanner(message: string): void;
@@ -220,6 +221,11 @@ function renderChart(
   parts.push(`<circle class="chart-hover-dot" cx="0" cy="0" r="3.5" />`);
 
   svg.innerHTML = parts.join("");
+  // 暴露坐标映射，供 hover 时把鼠标 x 反推成时间（判断数据缺口）
+  svg.dataset.fromT = String(from);
+  svg.dataset.toT = String(to);
+  svg.dataset.plotW = String(plotW);
+  svg.dataset.range = rangeKey;
   return points;
 }
 
@@ -318,6 +324,7 @@ export function mountApp(
             <div class="chart-tooltip" role="status" hidden>
               <span class="chart-tooltip-time"></span>
               <span class="chart-tooltip-level"></span>
+              <span class="chart-tooltip-gap" hidden></span>
             </div>
           </div>
         </div>
@@ -392,6 +399,7 @@ export function mountApp(
   const chartTooltip = root.querySelector<HTMLElement>(".chart-tooltip")!;
   const chartTooltipTime = root.querySelector<HTMLElement>(".chart-tooltip-time")!;
   const chartTooltipLevel = root.querySelector<HTMLElement>(".chart-tooltip-level")!;
+  const chartTooltipGap = root.querySelector<HTMLElement>(".chart-tooltip-gap")!;
   const rangeButtons = Array.from(
     root.querySelectorAll<HTMLButtonElement>(".chart-ranges button"),
   );
@@ -418,6 +426,7 @@ export function mountApp(
 
   let currentPosition = 0;
   let currentEvents: VoteEvent[] = [];
+  let currentGaps: VoteGap[] = [];
   let currentRange: RangeKey = "24h";
   let currentHalfLifeMs = halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS);
   let chartPoints: ChartPoint[] = [];
@@ -480,6 +489,10 @@ export function mountApp(
   const setEvents = (events: VoteEvent[]): void => {
     currentEvents = events;
     redrawChart();
+  };
+
+  const setGaps = (gaps: VoteGap[]): void => {
+    currentGaps = gaps;
   };
 
   const setHalfLife = (hours: number): void => {
@@ -610,10 +623,38 @@ export function mountApp(
     }
 
     const dot = chartSvg.querySelector<SVGCircleElement>(".chart-hover-dot");
-    // 距离数据点太远（如空白区）时，只保留竖线、隐藏数据提示
+
+    // 鼠标所指时间：非 tick 模式用 x 线性反推（缺口段内没有数据点，必须用插值）
+    let hoverT = best.t;
+    const svgRange = chartSvg.dataset.range;
+    if (svgRange !== "tick") {
+      const fromT = Number(chartSvg.dataset.fromT);
+      const toT = Number(chartSvg.dataset.toT);
+      const plotW = Number(chartSvg.dataset.plotW);
+      if (Number.isFinite(fromT) && Number.isFinite(toT) && plotW > 0) {
+        hoverT = fromT + ((px - CHART_PAD.left) / plotW) * (toT - fromT);
+      }
+    }
+
+    // 数据缺口：鼠标所指时间落在「限额爆了、事件未录入」的窗口内
+    const inGap = currentGaps.find((gap) => {
+      const end = gap.end ?? Number.POSITIVE_INFINITY;
+      return hoverT >= gap.start && hoverT <= end;
+    });
+
+    // 距离数据点太远（空白区）：缺口段内也要给提示，其余隐藏数据提示
     if (bestDist > 60) {
       if (dot) dot.style.display = "none";
-      chartTooltip.hidden = true;
+      if (!inGap) {
+        chartTooltip.hidden = true;
+        return;
+      }
+      chartTooltipTime.textContent = formatFullTime(hoverT, currentRange);
+      chartTooltipLevel.textContent = "";
+      chartTooltipGap.textContent = inGap.reason;
+      chartTooltipGap.hidden = false;
+      chartTooltip.hidden = false;
+      positionTooltip(px, py);
       return;
     }
 
@@ -629,16 +670,27 @@ export function mountApp(
       : formatFullTime(best.t, currentRange);
     chartTooltipLevel.textContent = `${state.stage} · ${state.level} 级`;
 
+    if (inGap) {
+      chartTooltipGap.textContent = inGap.reason;
+      chartTooltipGap.hidden = false;
+    } else {
+      chartTooltipGap.hidden = true;
+    }
+
     chartTooltip.hidden = false;
-    // 定位 tooltip（相对 chart-body），跟随点、避免溢出
+    positionTooltip(best.x, best.y);
+  };
+
+  // 定位 tooltip（相对 chart-body），跟随锚点、避免溢出
+  const positionTooltip = (anchorX: number, anchorY: number): void => {
     const body = chartTooltip.parentElement!;
     const bodyRect = body.getBoundingClientRect();
     const tipW = chartTooltip.offsetWidth || 140;
     const tipH = chartTooltip.offsetHeight || 44;
-    let left = best.x + 12;
-    let top = best.y - tipH - 8;
-    if (left + tipW > bodyRect.width - 4) left = best.x - tipW - 12;
-    if (top < 4) top = best.y + 12;
+    let left = anchorX + 12;
+    let top = anchorY - tipH - 8;
+    if (left + tipW > bodyRect.width - 4) left = anchorX - tipW - 12;
+    if (top < 4) top = anchorY + 12;
     chartTooltip.style.left = `${left}px`;
     chartTooltip.style.top = `${top}px`;
   };
@@ -682,6 +734,7 @@ export function mountApp(
     setVotes,
     setVoteState,
     setEvents,
+    setGaps,
     setHalfLife,
     setHalfLifeStatus,
     showQuotaBanner,

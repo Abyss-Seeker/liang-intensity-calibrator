@@ -3,6 +3,13 @@ export interface VoteEvent {
   d: "up" | "down";
 }
 
+// 数据缺口：某时间段内投票因 KV 配额耗尽未被记录，走势图悬停时应提示。
+export interface VoteGap {
+  start: number;
+  end: number | null;
+  reason: string;
+}
+
 export interface VoteTally {
   up: number;
   down: number;
@@ -11,6 +18,7 @@ export interface VoteTally {
   weightedUp: number;
   weightedDown: number;
   events: VoteEvent[];
+  gaps?: VoteGap[];
   voted: boolean;
   votedDirection: "up" | "down" | null;
 }
@@ -44,6 +52,7 @@ export async function fetchVotes(): Promise<VoteTally> {
     weightedUp: data.weightedUp ?? data.up ?? 0,
     weightedDown: data.weightedDown ?? data.down ?? 0,
     events: data.events ?? [],
+    gaps: data.gaps ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,
   };
@@ -89,6 +98,7 @@ export async function castVote(direction: VoteDirection): Promise<VoteResponse> 
     weightedUp: data.weightedUp ?? data.up ?? 0,
     weightedDown: data.weightedDown ?? data.down ?? 0,
     events: data.events ?? [],
+    gaps: data.gaps ?? [],
     voted: data.voted ?? false,
     votedDirection: data.votedDirection ?? null,
     reason: data.reason,
