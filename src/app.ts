@@ -560,13 +560,14 @@ export function mountApp(
     if (dot) dot.style.display = "none";
   };
 
-  chartSvg.addEventListener("mousemove", (event) => {
+  // 统一的悬浮/触摸定位：clientX/clientY 为视口坐标，换算成图表内坐标
+  const updateHover = (clientX: number, clientY: number): void => {
     if (chartPoints.length === 0) return;
     const rect = chartSvg.getBoundingClientRect();
-    const px = event.clientX - rect.left;
-    const py = event.clientY - rect.top;
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
 
-    // 十字竖线：始终跟随鼠标 x、贯穿绘图区，方便对齐时间轴
+    // 十字竖线：始终跟随 x、贯穿绘图区，方便对齐时间轴
     const line = chartSvg.querySelector<SVGLineElement>(".chart-hover-line");
     if (line) {
       line.style.display = "inline";
@@ -617,9 +618,28 @@ export function mountApp(
     if (top < 4) top = best.y + 12;
     chartTooltip.style.left = `${left}px`;
     chartTooltip.style.top = `${top}px`;
+  };
+
+  chartSvg.addEventListener("mousemove", (event) => {
+    updateHover(event.clientX, event.clientY);
   });
 
   chartSvg.addEventListener("mouseleave", hideTooltip);
+
+  // 移动端：手指拖动竖线跟随（无 hover，只能靠触摸）。touch-action: pan-y
+  // 让垂直滚动仍归浏览器，水平拖动交给这里处理竖线。
+  chartSvg.addEventListener("touchstart", (event) => {
+    const touch = event.touches[0];
+    if (touch) updateHover(touch.clientX, touch.clientY);
+  }, { passive: true });
+
+  chartSvg.addEventListener("touchmove", (event) => {
+    event.preventDefault();
+    const touch = event.touches[0];
+    if (touch) updateHover(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  // 手指离开后保留竖线在最后位置（同股票软件），便于查看最终值
 
   // 窗口尺寸变化时重绘（保持文字不拉伸）
   if (typeof ResizeObserver !== "undefined") {

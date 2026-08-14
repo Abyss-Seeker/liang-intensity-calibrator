@@ -783,6 +783,8 @@ h1 {
   width: 100%;
   height: 150px;
   color: var(--ink);
+  /* 移动端：垂直滚动仍归浏览器，水平拖动交给 JS 处理竖线 */
+  touch-action: pan-y;
 }
 
 .chart-grid {
