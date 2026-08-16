@@ -11,5 +11,19 @@
       "binding": "VOTES",
       "id": "cafa1963a48c4beb8423deb9dd952fb8"
     }
-  ]
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VOTE_COORDINATOR",
+        "class_name": "VoteCoordinator"
+      }
+    ]
+  },
+  "exports": {
+    "VoteCoordinator": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
 }

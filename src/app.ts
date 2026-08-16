@@ -24,7 +24,7 @@ export interface AppController {
   setGaps(gaps: VoteGap[]): void;
   setHalfLife(hours: number): void;
   setHalfLifeStatus(message: string, isError?: boolean): void;
-  showQuotaBanner(message: string): void;
+  showServiceBanner(message: string): void;
   onVote(handler: VoteHandler): void;
   onShowCommunity(handler: () => void): void;
   onSaveHalfLife(handler: (hours: number) => void): void;
@@ -556,8 +556,8 @@ export function mountApp(
     halfLifeStatus.classList.toggle("is-error", isError);
   };
 
-  // 投票写入配额耗尽时的顶部告警条（挂 document.body，避免被页面 transform 影响）
-  const showQuotaBanner = (message: string): void => {
+  // 投票后端不可用时的顶部告警条（挂 document.body，避免被页面 transform 影响）
+  const showServiceBanner = (message: string): void => {
     let banner = document.querySelector<HTMLElement>(".quota-banner");
     if (!banner) {
       banner = document.createElement("div");
@@ -740,7 +740,7 @@ export function mountApp(
     setGaps,
     setHalfLife,
     setHalfLifeStatus,
-    showQuotaBanner,
+    showServiceBanner,
     onVote,
     onShowCommunity,
     onSaveHalfLife,

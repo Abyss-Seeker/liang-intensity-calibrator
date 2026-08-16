@@ -13,16 +13,16 @@
 - 241 张连续 WebP 人像帧，滑杆支持 0.01 级精度
 - 六个状态：小难梁、牢梁、梁子、梁圣、梁神、梁祖
 - 支持鼠标、触摸和键盘操作，适配桌面与手机浏览器
-- **社区投票**：每天一票（up / down），免登录，Cloudflare KV 存储，按 IP 限投，本地午夜重置
+- **社区投票**：每天一票（up / down），免登录，以匿名 HttpOnly cookie 为主身份、IP 为共享网络滥用上限，按 UTC 日期重置
 - **共识评分算法（方案 B）**：等级 = 方向(净票) × 强度(净票规模) × 共识度(少数方占比 + 样本因子)，20 净票满级，无死区
 - **时间衰减**：票的权重按指数半衰期衰减（默认 18 小时），只统计最近 30 天；半衰期可在设置面板自定义（仅本机生效，不影响他人）
-- **股票式走势图**：事件流模型，「每票 / 近一年 / 全部」三个视图，鼠标悬浮或手指拖动显示对应时间与等级
+- **股票式走势图**：事件流模型，API 最多公开最近 1000 条且时间降为分钟精度，鼠标悬浮或手指拖动显示对应时间与等级
 - 视频渲染容错：完整加载 + seek 到位确认 + 失败重试，冷启动 / 慢网下不闪屏
 
 ## 技术栈
 
 - 前端：TypeScript + Vite 8（`@cloudflare/vite-plugin` 集成）
-- 后端：Cloudflare Workers + KV（免登录投票，`/api/vote`）
+- 后端：Cloudflare Workers + SQLite Durable Object（事务化投票，`/api/vote`）；旧 KV 仅用于首次自动导入历史事件
 - 测试：Vitest（单元）+ Playwright（E2E）
 - 部署：GitHub Actions 自动构建 GitHub Pages；`wrangler deploy` 发布 Cloudflare Workers
 
@@ -44,6 +44,7 @@ npm run dev
 ```bash
 npm run dev            # 本地开发（Vite + Workers 模拟）
 npm test               # 单元测试
+npm run test:worker    # 真实 workerd 的 Durable Object/SQLite/Alarm 测试
 npm run test:e2e       # 浏览器交互测试（Playwright）
 npm run build          # 构建 Cloudflare Workers 部署包（dist/）
 npm run build:pages    # 构建 GitHub Pages 发布文件（dist-pages/）
@@ -52,8 +53,10 @@ npx wrangler deploy    # 部署到 Cloudflare Workers
 
 ## 投票 API
 
-- `GET /api/vote`：返回当前加权票数（up / down / net）、等级、完整事件流，以及当前 IP 今天是否已投。
-- `POST /api/vote`：投一票。body 为 `{ "direction": "up" | "down", "resetAt": <本地午夜时间戳> }`。`resetAt` 让每日配额按用户本地零点重置（而非投完 24 小时）。
+- `GET /api/vote`：返回当前加权票数（up / down / net）、等级、最近 1000 条分钟精度事件，以及当前匿名身份今天是否已投；`eventsTruncated` 表示历史是否被截断。
+- `POST /api/vote`：投一票。body 只有 `{ "direction": "up" | "down" }`。每日周期由服务端按 UTC 日期计算，客户端不能指定重置时间。
+
+投票写入由单例 Durable Object 串行协调，并在同一 SQLite 事务中写入“每日匿名身份”与事件，因此不会出现 KV `get`/`put` 竞态、并发覆盖或“响应失败但票已入账”。单 IP 另有每分钟 5 次 POST 的内存限流和每日 20 个不同匿名身份的共享网络上限；IP 使用服务端随机密钥与 UTC 日期生成短期摘要，不写入历史事件。跨源 POST、非 JSON 请求和超过 1 KiB 的请求体会在写入前被拒绝。
 
 ## 评分算法（方案 B）
 
@@ -90,7 +93,14 @@ WebP 结果位于 `public/evolution-frames`；单帧加载失败时会回退到 
 ## 发布
 
 - **GitHub Pages**：项目使用 GitHub Actions 自动发布。向 `main` 分支推送提交后，工作流会构建 `dist-pages` 并更新 GitHub Pages。
-- **Cloudflare Workers**：执行 `npx wrangler deploy` 发布到 Workers 并绑定 KV 命名空间 `VOTES`，自定义域名指向 `liang.itsuyo.top`。
+- **Cloudflare Workers**：执行 `npx wrangler deploy` 发布。Wrangler 会按 `exports.VoteCoordinator` 自动创建 SQLite Durable Object 命名空间；保留现有 `VOTES` KV 绑定用于首次导入旧 `events`。
+
+首次迁移必须按以下顺序执行：
+
+1. 备份 KV 的 `events` 原始 JSON，并记录合法、未超过 365 天的事件数；不要先删除或改名该键。全新实例没有历史时，也要先明确写入 JSON `[]`，缺键会按数据丢失风险 fail-closed。
+2. 在低流量窗口部署，新 Worker 会严格校验完整数组、计算来源哈希，以单个 JSON 绑定参数分批写入，并在事务内核对实际导入行数；缺键、损坏成员或计数不一致都会 fail-closed 为 503，不会写入“已迁移”标记。
+3. 等待至少 5 分钟。Durable Object alarm 会再读一次 KV，吸收切换瞬间旧 Worker 尚未传播的尾部写入；来源哈希变化时只重建 legacy 子集并继续复核，连续一次来源不变后持久化为 `finalized`，后续冷启动不再读取 KV。新 Worker 已接收的 UUID 事件不受影响，临时核对失败会显式重新调度 alarm。
+4. 检查 `/api/vote` 的 `totalEvents` 不小于备份中的有效保留事件数，并观察 429/503 与 Durable Object 用量。若不一致，恢复 KV 备份后重新部署触发核对，或回滚 Worker；确认无误前保留 KV 绑定和备份。
 
 ## 素材说明
 
@@ -100,4 +110,3 @@ WebP 结果位于 `public/evolution-frames`；单帧加载失败时会回退到 
 
 - 原作者：[Lichtspektrum](https://github.com/Lichtspektrum)（[原项目仓库](https://github.com/Lichtspektrum/liang-intensity-calibrator)）
 - B 站：[怎么什么昵称都选不了](https://space.bilibili.com/503567859) · [一下作者](https://space.bilibili.com/291088426)
-

@@ -6,19 +6,16 @@ import {
   type EvolutionVideoRenderer,
   VideoLoadTimeoutError,
 } from "./video-renderer";
-import {
-  DEFAULT_HALF_LIFE_HOURS,
-  halfLifeMsFromHours,
-  tallyFromEvents,
-} from "./progression";
+import { DEFAULT_HALF_LIFE_HOURS } from "./progression";
 import {
   castVote,
   fetchVotes,
   type VoteDirection,
   type VoteEvent,
-  type VoteGap,
-  VoteQuotaExceededError,
+  type VoteTally,
+  VoteServiceUnavailableError,
 } from "./vote";
+import { resolveDisplayTally } from "./vote-display";
 
 const app = document.querySelector<HTMLElement>("#app");
 
@@ -62,6 +59,7 @@ let animFrame = 0;
 let userAdjustedLevel = false;
 let localHalfLifeHours = loadLocalHalfLife();
 let currentEvents: VoteEvent[] = [];
+let currentTally: VoteTally | null = null;
 const FRAME_TIMEOUT_RELOAD_KEY = "liang-frame-timeout-reloaded";
 
 const recoverFromFrameError = (error: unknown): void => {
@@ -92,8 +90,12 @@ const requestDraw = (level: number): void => {
 // 用本地半衰期重算等级 + 更新 UI（社区评分/单票影响力/走势图），
 // 让半衰期只影响本机显示，不依赖后端全局值。
 const recalcLocalTally = (): void => {
-  const halfLifeMs = halfLifeMsFromHours(localHalfLifeHours);
-  const tally = tallyFromEvents(currentEvents, halfLifeMs, Date.now());
+  if (!currentTally) return;
+  const tally = resolveDisplayTally(
+    currentTally,
+    localHalfLifeHours,
+    Date.now(),
+  );
   communityLevel = tally.level;
   controller?.setVotes(
     tally.up,
@@ -104,11 +106,18 @@ const recalcLocalTally = (): void => {
   );
   controller?.setEvents(currentEvents);
   controller?.setHalfLife(localHalfLifeHours);
+  if (tally.approximate) {
+    controller?.setHalfLifeStatus(
+      `公开历史已截断，半衰期 ${localHalfLifeHours} 小时的加权结果为近似值`,
+      true,
+    );
+  }
 };
 
-const applyTally = (events: VoteEvent[], gaps?: VoteGap[]): void => {
-  currentEvents = events;
-  controller?.setGaps(gaps ?? []);
+const applyTally = (tally: VoteTally): void => {
+  currentTally = tally;
+  currentEvents = tally.events;
+  controller?.setGaps(tally.gaps ?? []);
   recalcLocalTally();
 };
 
@@ -133,7 +142,7 @@ const animateToLevel = (target: number): void => {
 const syncVotes = async (): Promise<void> => {
   try {
     const tally = await fetchVotes();
-    applyTally(tally.events, tally.gaps);
+    applyTally(tally);
     if (!userAdjustedLevel && controller && !controller.slider.disabled) {
       controller.setLevel(communityLevel);
     }
@@ -182,7 +191,7 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.events, result.gaps);
+    applyTally(result);
     if (result.reason) {
       controller?.setVoteState(
         "voted",
@@ -196,12 +205,14 @@ controller.onVote(async (direction: VoteDirection) => {
       );
     }
   } catch (error) {
-    if (error instanceof VoteQuotaExceededError) {
-      // 免费 KV 写入配额耗尽：投票核心功能瘫痪，弹 banner 让访客知道是限额
-      controller?.setVoteState("error", "今日投票额度已用尽");
-      controller?.showQuotaBanner(error.message);
+    if (error instanceof VoteServiceUnavailableError) {
+      controller?.setVoteState("error", "投票服务暂不可用");
+      controller?.showServiceBanner(error.message);
     } else {
-      controller?.setVoteState("error", "投票失败，请重试");
+      controller?.setVoteState(
+        "error",
+        error instanceof Error ? error.message : "投票失败，请重试",
+      );
     }
   }
 });
@@ -246,4 +257,3 @@ if (isInAppBrowser()) {
 window.addEventListener("resize", () => {
   renderer?.redraw();
 });
-

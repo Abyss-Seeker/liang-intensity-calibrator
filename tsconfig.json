@@ -13,5 +13,6 @@
     "strict": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "tests", "playwright.config.ts"]
+  "include": ["src", "tests", "playwright.config.ts", "vitest.worker.config.ts"],
+  "exclude": ["src/poc-*.test.ts"]
 }

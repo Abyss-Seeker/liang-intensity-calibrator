@@ -1,79 +1,21 @@
+export { VoteCoordinator } from "./vote-coordinator";
+
+import type { DurableObjectNamespace } from "cloudflare:workers";
+
 interface AssetsBinding {
   fetch(request: Request): Promise<Response>;
 }
 
-interface KVNamespace {
-  get(key: string): Promise<string | null>;
-  put(
-    key: string,
-    value: string,
-    options?: { expirationTtl?: number },
-  ): Promise<void>;
-}
-
 interface Env {
   ASSETS: AssetsBinding;
-  VOTES: KVNamespace;
+  VOTE_COORDINATOR: DurableObjectNamespace;
 }
 
-interface VoteEvent {
-  t: number;
-  d: "up" | "down";
-}
+const VOTER_COOKIE = "liang_voter";
+const VOTER_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
 
-// 数据缺口：某个时间段内投票因 KV 写入配额耗尽而未被记录。
-// end 为 null 表示缺口仍在进行中。reason 直接展示给访客。
-interface VoteGap {
-  start: number;
-  end: number | null;
-  reason: string;
-}
-
-// 已知事故窗口（硬编码，长期展示）。北京时间 2026-08-14 09:53 ~ 12:11
-// 之间 KV 免费版写入配额耗尽，投票全部 500，事件流未记录任何票。
-const STATIC_GAPS: VoteGap[] = [
-  {
-    start: Date.UTC(2026, 7, 14, 1, 53, 0), // 北京 09:53
-    end: Date.UTC(2026, 7, 14, 4, 11, 0), // 北京 12:11
-    reason: "网页限额爆了，数据未录入，不准确",
-  },
-];
-
-// 运行期自动收集的缺口（isolate 内存，尽力而为：CF 会复用 isolate，
-// 同一时段内的请求大概率共享；跨 isolate/重启会丢失，但静态窗口兜底）。
-let runtimeGaps: VoteGap[] = [];
-
-// 投票成功/失败时更新运行期缺口：失败开缺口，成功闭缺口。
-function trackGap(now: number, failed: boolean): void {
-  const open = runtimeGaps.find((g) => g.end === null);
-  if (failed) {
-    if (!open) {
-      runtimeGaps.push({ start: now, end: null, reason: "网页限额爆了，数据未录入，不准确" });
-    }
-    return;
-  }
-  if (open) {
-    open.end = now;
-  }
-}
-
-function visibleGaps(): VoteGap[] {
-  return [...STATIC_GAPS, ...runtimeGaps];
-}
-
-const BASE_LEVEL = 15;
-const VOTE_FULL_NET = 20; // 20 净票满级（梁祖/小难梁）
-const CONSENSUS_FLOOR = 0.1; // 共识度下限：对半附近每票仍有微弱影响（无死区）
-const CONSENSUS_R_FULL = 0.1; // 满级容忍带：少数方占比 ≤10%（即 9:1 以上）即满级
-const CONSENSUS_N_FULL = 20; // 样本满级门槛：总票数 ≥20 才精确满级
-const HALF_LIFE_MS = 18 * 3600 * 1000; // 指数半衰期，固定 18 小时
-const WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
-const EVENTS_KEY = "events";
-const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
-const VOTE_TTL_SECONDS = 24 * 60 * 60; // 兜底：未提供 resetAt 时的默认 TTL
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
+function apiError(reason: string, status: number, code?: string): Response {
+  return new Response(JSON.stringify({ ...(code ? { code } : {}), reason }), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
@@ -82,183 +24,70 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-// 共识度：少数方占比容忍带 × 样本因子，输出 0~1，无死区。
-// 反对 ≤10%（9:1 以上）→ 满分；对半 → 下限 0.1；总票数 ≥20 → 样本因子 1（满级可达）。
-function consensusFactor(up: number, down: number): number {
-  const n = up + down;
-  if (n <= 0) return 0;
-  const r = Math.min(up, down) / n; // 少数方占比 0~0.5
-  const raw = (0.5 - r) / (0.5 - CONSENSUS_R_FULL);
-  const floored = Math.max(raw, CONSENSUS_FLOOR);
-  const capped = Math.min(floored, 1);
-  const sample = Math.min(1, n / CONSENSUS_N_FULL);
-  return capped * sample;
-}
-
-// 由加权票数计算等级：方向(净票符号) × 强度(净票规模) × 共识度(多数方占比)。
-function levelFromTally(upW: number, downW: number): number {
-  const net = upW - downW;
-  if (net === 0) return BASE_LEVEL;
-  const strength = Math.min(1, Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET));
-  const consensus = consensusFactor(upW, downW);
-  return Math.min(
-    30,
-    Math.max(
-      0,
-      BASE_LEVEL + BASE_LEVEL * strength * consensus * Math.sign(net),
-    ),
-  );
-}
-
-// 单票在 age 毫秒前的权重（指数半衰期）
-function voteWeight(ageMs: number): number {
-  return Math.pow(0.5, ageMs / HALF_LIFE_MS);
-}
-
 function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "unknown";
 }
 
-async function readEvents(env: Env): Promise<VoteEvent[]> {
-  const raw = await env.VOTES.get(EVENTS_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as VoteEvent[]) : [];
-  } catch {
-    return [];
+function readCookie(request: Request, name: string): string | null {
+  const header = request.headers.get("Cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    const key = part.slice(0, separator).trim();
+    if (key !== name) continue;
+    return part.slice(separator + 1).trim();
   }
+  return null;
 }
 
-// 计算当前加权票数与等级（时间衰减后），供等级映射使用。
-function computeTally(events: VoteEvent[], now: number) {
-  let up = 0;
-  let down = 0;
-  let upW = 0;
-  let downW = 0;
-  for (const e of events) {
-    const age = now - e.t;
-    if (age < 0 || age > WINDOW_MS) continue;
-    const w = voteWeight(age);
-    if (e.d === "up") {
-      up += 1;
-      upW += w;
-    } else {
-      down += 1;
-      downW += w;
-    }
-  }
-  return {
-    up,
-    down,
-    net: upW - downW,
-    weightedUp: upW,
-    weightedDown: downW,
-    level: levelFromTally(upW, downW),
-  };
+function validVoterId(value: string | null): value is string {
+  return Boolean(value && /^[A-Za-z0-9_-]{16,128}$/.test(value));
 }
 
-// 根据用户本地时区的"下一个午夜"时间戳计算 voted:{ip} 的 TTL。
-// resetAt 是前端传来的本地午夜绝对时间戳（毫秒）；TTL 是"离午夜还剩多少秒"，
-// 让每天的投票在用户本地 0 点重置（而非投完 24h）。clamp 到 [1s, 24h]。
-function voteTtlSeconds(resetAt: unknown, now: number): number {
-  const ms = Number(resetAt);
-  if (!Number.isFinite(ms) || ms <= now) return VOTE_TTL_SECONDS;
-  const seconds = Math.round((ms - now) / 1000);
-  return Math.min(Math.max(seconds, 1), VOTE_TTL_SECONDS);
+function voterCookie(value: string): string {
+  return [
+    `${VOTER_COOKIE}=${value}`,
+    `Max-Age=${VOTER_COOKIE_MAX_AGE}`,
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+  ].join("; ");
 }
 
 async function handleVote(request: Request, env: Env): Promise<Response> {
-  const ip = clientIp(request);
-  const votedKey = `voted:${ip}`;
-  const alreadyVoted = await env.VOTES.get(votedKey);
+  const suppliedVoterId = readCookie(request, VOTER_COOKIE);
+  const hasVoterCookie = validVoterId(suppliedVoterId);
+  const voterId = hasVoterCookie ? suppliedVoterId : crypto.randomUUID();
 
-  if (request.method === "GET") {
-    const events = await readEvents(env);
-    const tally = computeTally(events, Date.now());
-    return json({
-      ...tally,
-      events,
-      gaps: visibleGaps(),
-      voted: Boolean(alreadyVoted),
-      votedDirection: alreadyVoted ?? null,
-    });
-  }
-
-  if (request.method !== "POST") {
-    return json({ reason: "不支持的请求方法" }, 405);
-  }
-
-  let direction: string;
-  let resetAt: unknown;
+  // 外层 Worker 始终覆盖内部身份头，客户端无法伪造 cookie/IP 哈希输入。
+  const headers = new Headers(request.headers);
+  headers.set("X-Liang-Voter-Id", voterId);
+  headers.set("X-Liang-Client-IP", clientIp(request));
+  const internalRequest = new Request(request, { headers });
+  let response: Response;
   try {
-    const body = (await request.json()) as {
-      direction?: string;
-      resetAt?: unknown;
-    };
-    direction = body.direction ?? "";
-    resetAt = body.resetAt;
-  } catch {
-    return json({ reason: "请求体不是合法 JSON" }, 400);
-  }
-
-  if (direction !== "up" && direction !== "down") {
-    return json({ reason: "方向必须是 up 或 down" }, 400);
-  }
-
-  if (alreadyVoted) {
-    const events = await readEvents(env);
-    const tally = computeTally(events, Date.now());
-    return json({
-      ...tally,
-      events,
-      gaps: visibleGaps(),
-      voted: true,
-      votedDirection: alreadyVoted,
-      reason: "今天已经投过票了，明天再来吧",
-    });
-  }
-
-  const now = Date.now();
-  const events = await readEvents(env);
-  const snapshot = events.slice(); // KV 中真实存在的事件（不含本次失败票）
-  events.push({ t: now, d: direction });
-  const trimmed = events.slice(-EVENTS_MAX);
-
-  // KV 免费版写入配额（1000 次/天）耗尽时 put 会抛错。不 catch 的话 Worker
-  // 会返回 Cloudflare 默认 500 错误页，前端拿不到任何可读信息；这里统一
-  // 转成 503 + code 的 JSON，并打出日志方便在 Workers Logs 里定位。
-  try {
-    await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
-    await env.VOTES.put(votedKey, direction, {
-      expirationTtl: voteTtlSeconds(resetAt, now),
-    });
+    const objectId = env.VOTE_COORDINATOR.idFromName(
+      "global-vote-coordinator",
+    );
+    response = await env.VOTE_COORDINATOR.get(objectId).fetch(internalRequest);
   } catch (error) {
-    console.error("[vote] KV 写入失败（疑似每日写入配额耗尽）", error);
-    trackGap(now, true);
-    return json(
-      {
-        code: "kv_quota",
-        reason:
-          "今天的投票人数太火爆，把免费额度冲爆啦。站长正在急头白脸加额度中，稍后再来试试吧！",
-        ...computeTally(snapshot, now),
-        events: snapshot,
-        gaps: visibleGaps(),
-        voted: false,
-        votedDirection: null,
-      },
+    console.error("[vote] Durable Object 请求失败", error);
+    response = apiError(
+      "投票服务暂时不可用，请稍后再试",
       503,
+      "vote_storage_unavailable",
     );
   }
 
-  trackGap(now, false);
-  const tally = computeTally(trimmed, now);
-  return json({
-    ...tally,
-    events: trimmed,
-    gaps: visibleGaps(),
-    voted: true,
-    votedDirection: direction,
+  if (hasVoterCookie) return response;
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.append("Set-Cookie", voterCookie(voterId));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
   });
 }
 
@@ -266,6 +95,27 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/api/vote") {
+      if (request.method !== "GET" && request.method !== "POST") {
+        return apiError("不支持的请求方法", 405);
+      }
+      if (request.method === "POST") {
+        const origin = request.headers.get("Origin");
+        if (origin && origin !== url.origin) {
+          return apiError("不允许跨站提交投票", 403);
+        }
+        const contentType = request.headers
+          .get("Content-Type")
+          ?.split(";", 1)[0]
+          .trim()
+          .toLowerCase();
+        if (contentType !== "application/json") {
+          return apiError("投票请求必须使用 application/json", 415);
+        }
+        const contentLength = Number(request.headers.get("Content-Length"));
+        if (Number.isFinite(contentLength) && contentLength > 1_024) {
+          return apiError("投票请求体过大", 413);
+        }
+      }
       return handleVote(request, env);
     }
     return env.ASSETS.fetch(request);
