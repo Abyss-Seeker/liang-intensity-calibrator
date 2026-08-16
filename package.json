@@ -9,10 +9,12 @@
     "build:pages": "tsc --noEmit && vite build --config vite.pages.config.ts --mode github-pages",
     "preview": "vite preview",
     "test": "vitest",
+    "test:worker": "vitest --config vitest.worker.config.ts --run",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.51.1",
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0",
     "jsdom": "^26.1.0",
