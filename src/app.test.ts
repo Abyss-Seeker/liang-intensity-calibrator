@@ -12,35 +12,36 @@ describe("liang slider app", () => {
     root = document.querySelector<HTMLElement>("#app")!;
   });
 
-  it("渲染含缓冲带的强度滑杆（-30~60）和 31 个正常带刻度", () => {
+  it("渲染强度滑杆（0~30）和 31 个正常带刻度", () => {
     mountApp(root);
 
     const slider = root.querySelector<HTMLInputElement>("#strength-slider")!;
-    expect(slider.min).toBe("-30");
-    expect(slider.max).toBe("60");
+    expect(slider.min).toBe("0");
+    expect(slider.max).toBe("30");
     expect(slider.step).toBe("0.01");
     expect(root.querySelectorAll(".tick")).toHaveLength(31);
   });
 
-  it("缓冲带内负数等级如实显示在滑块与输出上", () => {
+  it("缓冲带内负数等级按 0 展示（真实值保留在 controller）", () => {
     const controller = mountApp(root);
     controller.setLevel(-7.3);
 
     const slider = root.querySelector<HTMLInputElement>("#strength-slider")!;
-    expect(slider.value).toBe("-7.3");
+    expect(slider.value).toBe("0");
     expect(controller.level).toBe(-7.3);
     expect(root.querySelector(".stage-name")?.textContent).toBe("小难梁");
-    expect(root.querySelector(".level-output")?.textContent).toBe("-07 / 30");
+    expect(root.querySelector(".level-output")?.textContent).toBe("00 / 30");
   });
 
-  it("冲破 30 后仍按梁祖展示并保留数值", () => {
+  it("冲破 30 后按 30 展示并保留梁祖", () => {
     const controller = mountApp(root);
     controller.setLevel(35);
 
     const slider = root.querySelector<HTMLInputElement>("#strength-slider")!;
-    expect(slider.value).toBe("35");
+    expect(slider.value).toBe("30");
+    expect(controller.level).toBe(35);
     expect(root.querySelector(".stage-name")?.textContent).toBe("梁祖");
-    expect(root.querySelector(".level-output")?.textContent).toBe("35 / 30");
+    expect(root.querySelector(".level-output")?.textContent).toBe("30 / 30");
   });
 
   it("保留连续滑动位置并用最近等级更新文字", () => {

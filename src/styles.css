@@ -880,20 +880,6 @@ h1 {
   stroke: #1e9e50;
 }
 
-.chart-ref-label {
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.chart-ref-label.chart-ref--zero {
-  fill: #2f6fe4;
-}
-
-.chart-ref-label.chart-ref--thirty {
-  fill: #1e9e50;
-}
-
 .chart-hover-line {
   display: none;
   stroke: var(--ink);
@@ -1044,7 +1030,6 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.vote-weight,
 .vote-buffer {
   margin: 0;
   color: var(--muted);
@@ -1052,7 +1037,6 @@ h1 {
   letter-spacing: 0.04em;
 }
 
-.vote-weight-value,
 .vote-buffer-value {
   color: var(--ink);
   font-weight: 700;
