@@ -68,6 +68,12 @@ const CONSENSUS_R_FULL = 0.1; // 满级容忍带：少数方占比 ≤10%（即 
 const CONSENSUS_N_FULL = 20; // 样本满级门槛：总票数 ≥20 才精确满级
 const HALF_LIFE_MS = 18 * 3600 * 1000; // 指数半衰期，固定 18 小时
 const WINDOW_MS = 30 * 24 * 3600 * 1000; // 只统计最近 30 天
+
+// —— 缓冲带（0 以下 / 30 以上）—— 与前端 progression.ts 保持一致
+const LEVEL_MIN = -30;
+const LEVEL_MAX = 60;
+const BUFFER_SCALE = 200; // 超额起点：超额 200 净票缓冲约 2.77 级
+const BUFFER_GAIN = 4; // 超额每翻一倍，缓冲加深约 2.77 级（无上限，边际递减）
 const EVENTS_KEY = "events";
 const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
 const VOTE_TTL_SECONDS = 24 * 60 * 60; // 兜底：未提供 resetAt 时的默认 TTL
@@ -96,18 +102,19 @@ function consensusFactor(up: number, down: number): number {
 }
 
 // 由加权票数计算等级：方向(净票符号) × 强度(净票规模) × 共识度(多数方占比)。
+// 净票 ≤ 满级阈值（20）时与旧算法完全一致；超额才进缓冲带（log 增长，无上限）。
 function levelFromTally(upW: number, downW: number): number {
   const net = upW - downW;
   if (net === 0) return BASE_LEVEL;
   const strength = Math.min(1, Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET));
   const consensus = consensusFactor(upW, downW);
-  return Math.min(
-    30,
-    Math.max(
-      0,
-      BASE_LEVEL + BASE_LEVEL * strength * consensus * Math.sign(net),
-    ),
-  );
+  const core =
+    BASE_LEVEL + BASE_LEVEL * strength * consensus * Math.sign(net);
+  if (Math.abs(net) <= VOTE_FULL_NET) return core;
+  const excess = Math.abs(net) - VOTE_FULL_NET;
+  const buffer =
+    BUFFER_GAIN * Math.log(1 + excess / BUFFER_SCALE) * consensus * Math.sign(net);
+  return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, core + buffer));
 }
 
 // 单票在 age 毫秒前的权重（指数半衰期）

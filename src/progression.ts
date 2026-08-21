@@ -3,6 +3,18 @@ export const STAGES = ["小难梁", "牢梁", "梁子", "梁圣", "梁神", "梁
 export const MAX_LEVEL = 30;
 export const LEVELS_PER_STAGE = 6;
 
+// —— 缓冲带（0 以下 / 30 以上）——
+// 显示范围：正常带 0~30 两侧各留 30 级缓冲，滑块/图表 y 轴都落在这个范围内。
+// 算法本身不设饱和（log 增长），正常流量远够不到边界。
+export const LEVEL_MIN = -30;
+export const LEVEL_MAX = MAX_LEVEL + 30; // 60
+// 超额净票缓冲曲线：buffer = sign(net)·BUFFER_GAIN·ln(1 + 超额/BUFFER_SCALE)
+// - 超额 0（净票=满级阈值）→ 0，与旧算法严格连续、完全一致
+// - 超额 200 → 约 2.77 级；超额 800 → 约 6.4 级；超额 2000 → 约 9.6 级
+// - 不设上限，但每张票的边际影响随超额递增而递减（越来越弱）
+export const BUFFER_SCALE = 200;
+export const BUFFER_GAIN = 4;
+
 export type StageName = (typeof STAGES)[number];
 
 export interface ProgressionState {
@@ -16,16 +28,23 @@ export interface ProgressionState {
 }
 
 export function clampPosition(rawPosition: number): number {
-  return Math.min(MAX_LEVEL, Math.max(0, rawPosition));
+  return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, rawPosition));
 }
 
 export function getProgression(rawLevel: number): ProgressionState {
   const level = Math.round(clampPosition(rawLevel));
-  const stageIndex = Math.floor(level / LEVELS_PER_STAGE);
+  // 阶段只定义在 0~30：缓冲带内统一按最底/最顶阶段展示
+  const stageIndex = Math.min(
+    STAGES.length - 1,
+    Math.max(0, Math.floor(level / LEVELS_PER_STAGE)),
+  );
   const isFinalStage = stageIndex === STAGES.length - 1;
   const localProgress = isFinalStage
     ? 0
-    : (level - stageIndex * LEVELS_PER_STAGE) / LEVELS_PER_STAGE;
+    : Math.min(
+        1,
+        Math.max(0, (level - stageIndex * LEVELS_PER_STAGE) / LEVELS_PER_STAGE),
+      );
 
   return {
     level,
@@ -34,7 +53,7 @@ export function getProgression(rawLevel: number): ProgressionState {
     fromIndex: stageIndex,
     toIndex: isFinalStage ? stageIndex : stageIndex + 1,
     localProgress,
-    strength: level / MAX_LEVEL,
+    strength: Math.min(1, Math.max(0, level / MAX_LEVEL)),
   };
 }
 
@@ -61,6 +80,9 @@ export function consensusFactor(up: number, down: number): number {
 }
 
 // 由加权票数计算等级：方向(净票符号) × 强度(净票规模) × 共识度(多数方占比)。
+// 净票 ≤ 满级阈值（20）时与旧算法完全一致（0~30 内，相同票数相同分数）；
+// 只有净票超额（老算法已压到 0/30 边界）才进入缓冲带：core 不动，超额部分按
+// log 曲线累加缓冲（无上限、每票边际影响递减），并同样受共识度打折。
 export function levelFromTally(up: number, down: number): number {
   const net = up - down;
   if (net === 0) return COMMUNITY_BASE_LEVEL;
@@ -69,10 +91,14 @@ export function levelFromTally(up: number, down: number): number {
     Math.sqrt(Math.abs(net)) / Math.sqrt(VOTE_FULL_NET),
   );
   const consensus = consensusFactor(up, down);
-  return clampPosition(
+  const core =
     COMMUNITY_BASE_LEVEL +
-      COMMUNITY_BASE_LEVEL * strength * consensus * Math.sign(net),
-  );
+    COMMUNITY_BASE_LEVEL * strength * consensus * Math.sign(net);
+  if (Math.abs(net) <= VOTE_FULL_NET) return core; // 严格等于旧算法
+  const excess = Math.abs(net) - VOTE_FULL_NET;
+  const buffer =
+    BUFFER_GAIN * Math.log(1 + excess / BUFFER_SCALE) * consensus * Math.sign(net);
+  return clampPosition(core + buffer);
 }
 
 export function communityLevelFromTally(up: number, down: number): number {

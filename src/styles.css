@@ -365,20 +365,18 @@ h1 {
 .tick-track {
   position: absolute;
   top: 12px;
-  right: var(--rail-inset);
-  left: var(--rail-inset);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  left: 0;
+  right: 0;
   height: 24px;
   pointer-events: none;
 }
 
 .tick {
+  position: absolute;
   display: block;
   width: 1px;
   height: 7px;
-  justify-self: center;
+  transform: translateX(-50%);
   background: currentColor;
   opacity: 0.2;
   transition: height 120ms ease, opacity 120ms ease, background 120ms ease;
@@ -453,14 +451,14 @@ h1 {
 }
 
 .stage-markers {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 16px;
   margin: -2px 0 0;
-  padding: 0 var(--rail-inset);
   list-style: none;
 }
 
 .stage-marker {
+  position: absolute;
   width: 0;
   color: var(--muted);
   font-size: 11px;
@@ -866,6 +864,36 @@ h1 {
   stroke-width: 1.5;
 }
 
+/* 0 / 30 参考线：蓝线=正常带下界 0，绿线=正常带上界 30（不是绝对上限） */
+.chart-ref {
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.85;
+}
+
+.chart-ref--zero {
+  stroke: #2f6fe4;
+}
+
+.chart-ref--thirty {
+  stroke: #1e9e50;
+}
+
+.chart-ref-label {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.chart-ref-label.chart-ref--zero {
+  fill: #2f6fe4;
+}
+
+.chart-ref-label.chart-ref--thirty {
+  fill: #1e9e50;
+}
+
 .chart-hover-line {
   display: none;
   stroke: var(--ink);
@@ -984,9 +1012,9 @@ h1 {
 
 .vote-meta {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   margin-top: 10px;
 }
 
@@ -1014,6 +1042,30 @@ h1 {
   color: var(--ink);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.vote-weight,
+.vote-buffer {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.vote-weight-value,
+.vote-buffer-value {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 缓冲带状态用警示色，一眼看出在 0 以下 / 30 以上 */
+.vote-buffer-value {
+  color: #2f6fe4;
+}
+
+.vote-buffer[hidden] {
+  display: none;
 }
 
 .vote-show-community {

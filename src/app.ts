@@ -4,6 +4,8 @@ import {
   getProgression,
   halfLifeMsFromHours,
   levelSeries,
+  LEVEL_MAX,
+  LEVEL_MIN,
   MAX_LEVEL,
   singleVoteImpact,
   STAGES,
@@ -34,17 +36,27 @@ export type LevelChangeHandler = (level: number) => void;
 export type VoteState = "idle" | "voting" | "voted" | "error";
 export type VoteHandler = (direction: VoteDirection) => void;
 
+// 刻度/阶段标记按真实滑块坐标排布（滑块范围已含缓冲带，不能再靠 flex 均分）
+function levelFraction(level: number): number {
+  return (level - LEVEL_MIN) / (LEVEL_MAX - LEVEL_MIN);
+}
+
 function createTicks(): string {
   return Array.from(
     { length: MAX_LEVEL + 1 },
-    (_, level) => `<i class="tick" data-level="${level}" aria-hidden="true"></i>`,
+    (_, level) =>
+      `<i class="tick" data-level="${level}" style="left: ${(
+        levelFraction(level) * 100
+      ).toFixed(3)}%" aria-hidden="true"></i>`,
   ).join("");
 }
 
 function createStageMarkers(): string {
   return STAGES.map(
     (stage, index) =>
-      `<li class="stage-marker" data-level="${index * 6}" style="--marker-index: ${index}">${stage}</li>`,
+      `<li class="stage-marker" data-level="${index * 6}" style="--marker-index: ${index}; left: ${(
+        levelFraction(index * 6) * 100
+      ).toFixed(3)}%">${stage}</li>`,
   ).join("");
 }
 
@@ -158,8 +170,13 @@ function renderChart(
   const levels = logical.map((p) => p.y);
   const minL = levels.length ? Math.min(...levels) : 15;
   const maxL = levels.length ? Math.max(...levels) : 15;
-  const yMin = Math.max(0, Math.floor(minL - 1));
-  const yMax = Math.min(30, Math.ceil(maxL + 1));
+  // y 轴不再锁死 [0,30]：跟随数据（含缓冲带），只受显示范围约束。
+  // 数据跌入 0 以下时顶部强制露出 0 蓝线；冲破 30 时底部强制露出 30 绿线，
+  // 让缓冲带的深度/高度始终有参考系。
+  let yMin = Math.max(LEVEL_MIN, Math.floor(minL - 1));
+  let yMax = Math.min(LEVEL_MAX, Math.ceil(maxL + 1));
+  if (minL < 0) yMax = Math.max(yMax, 0);
+  if (maxL > MAX_LEVEL) yMin = Math.min(yMin, MAX_LEVEL);
   const yRange = Math.max(1, yMax - yMin);
 
   const xSpan = Math.max(1, to - from);
@@ -196,6 +213,26 @@ function renderChart(
       `<text class="chart-tick" x="${x.toFixed(1)}" y="${
         h - 8
       }" text-anchor="middle">${tickLabels[i]}</text>`,
+    );
+  }
+
+  // 0 / 30 参考线：蓝线=0，绿线=30（正常带边界，不是绝对上限）
+  const referenceLines: { level: number; cls: string }[] = [
+    { level: 0, cls: "chart-ref--zero" },
+    { level: MAX_LEVEL, cls: "chart-ref--thirty" },
+  ];
+  for (const ref of referenceLines) {
+    if (ref.level < yMin || ref.level > yMax) continue;
+    const y = yOf(ref.level);
+    parts.push(
+      `<line class="chart-ref ${ref.cls}" x1="${CHART_PAD.left}" y1="${y.toFixed(
+        1,
+      )}" x2="${w - CHART_PAD.right}" y2="${y.toFixed(1)}" />`,
+    );
+    parts.push(
+      `<text class="chart-ref-label ${ref.cls}" x="${
+        CHART_PAD.left + 4
+      }" y="${(y - 4).toFixed(1)}">${ref.level}</text>`,
     );
   }
 
@@ -273,8 +310,8 @@ export function mountApp(
             id="strength-slider"
             class="strength-slider"
             type="range"
-            min="0"
-            max="30"
+            min="${LEVEL_MIN}"
+            max="${LEVEL_MAX}"
             step="0.01"
             value="0"
             aria-label="梁系强度"
@@ -336,6 +373,12 @@ export function mountApp(
           <p class="vote-impact">
             单票影响力 <strong class="vote-impact-value">—</strong>
           </p>
+          <p class="vote-weight">
+            加权票 <strong class="vote-weight-value">—</strong>
+          </p>
+          <p class="vote-buffer" hidden>
+            缓冲带 <strong class="vote-buffer-value"></strong>
+          </p>
         </div>
 
         <button class="vote-show-community" type="button" data-action="show-community">
@@ -394,6 +437,11 @@ export function mountApp(
     ".vote-community-level",
   )!;
   const voteImpactValue = root.querySelector<HTMLElement>(".vote-impact-value")!;
+  const voteWeightValue = root.querySelector<HTMLElement>(".vote-weight-value")!;
+  const voteBuffer = root.querySelector<HTMLElement>(".vote-buffer")!;
+  const voteBufferValue = root.querySelector<HTMLElement>(
+    ".vote-buffer-value",
+  )!;
   const chartCurrent = root.querySelector<HTMLElement>(".chart-current")!;
   const chartSvg = root.querySelector<SVGSVGElement>(".vote-chart-svg")!;
   const chartTooltip = root.querySelector<HTMLElement>(".chart-tooltip")!;
@@ -431,6 +479,12 @@ export function mountApp(
   let currentHalfLifeMs = halfLifeMsFromHours(DEFAULT_HALF_LIFE_HOURS);
   let chartPoints: ChartPoint[] = [];
 
+  // 等级数字：负数补零成 "-07"，缓冲带外保持两位
+  const formatLevel = (level: number): string =>
+    level < 0
+      ? `-${String(Math.abs(level)).padStart(2, "0")}`
+      : String(level).padStart(2, "0");
+
   const setLevel = (rawLevel: number): void => {
     const position = clampPosition(rawLevel);
     const state = getProgression(position);
@@ -440,13 +494,14 @@ export function mountApp(
       "aria-valuetext",
       `${state.stage}，${state.level} 级，共 ${MAX_LEVEL} 级`,
     );
-    output.textContent = `${String(state.level).padStart(2, "0")} / ${MAX_LEVEL}`;
+    output.textContent = `${formatLevel(state.level)} / ${MAX_LEVEL}`;
     stageName.textContent = state.stage;
     stageGhost.textContent = state.stage;
     stageIndex.textContent = `阶段 ${String(state.stageIndex + 1).padStart(2, "0")} / 06`;
     portrait.setAttribute("aria-label", `当前形态：${state.stage}`);
     experience.dataset.stage = String(state.stageIndex);
-    const strength = position / MAX_LEVEL;
+    // 视觉强度仍按正常带 0~30 折算，缓冲带内不会变成负的
+    const strength = Math.min(1, Math.max(0, position / MAX_LEVEL));
     experience.style.setProperty("--strength", String(strength));
     experience.style.setProperty("--strength-pct", `${strength * 100}%`);
     const inkPct = strength >= 0.75 ? 1 : 0;
@@ -487,6 +542,20 @@ export function mountApp(
     const impactText =
       impact >= 0.1 ? impact.toFixed(2) : impact.toFixed(4);
     voteImpactValue.textContent = `≈ ${impactText} 级`;
+
+    // 每票权重聚合：时间衰减后的加权 up/down 票数
+    voteWeightValue.textContent = `↑ ${weightedUp.toFixed(1)} / ↓ ${weightedDown.toFixed(1)}`;
+
+    // 缓冲带状态：跌破 0 / 冲破 30 时提示
+    if (level < 0) {
+      voteBuffer.hidden = false;
+      voteBufferValue.textContent = `0 以下 · ${level.toFixed(1)} 级`;
+    } else if (level > MAX_LEVEL) {
+      voteBuffer.hidden = false;
+      voteBufferValue.textContent = `30 以上 · +${(level - MAX_LEVEL).toFixed(1)} 级`;
+    } else {
+      voteBuffer.hidden = true;
+    }
   };
 
   const setEvents = (events: VoteEvent[]): void => {

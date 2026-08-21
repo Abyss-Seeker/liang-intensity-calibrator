@@ -1,4 +1,4 @@
-import { clampPosition, MAX_LEVEL } from "./progression";
+import { MAX_LEVEL } from "./progression";
 
 const VIDEO_FPS = 30;
 const INTERPOLATION_FACTOR = 8;
@@ -22,8 +22,13 @@ export interface EvolutionVideoRenderer {
   redraw(): void;
 }
 
+// 视频帧只映射正常带 0~30：缓冲带（0 以下 / 30 以上）按最底/最顶帧展示
+function stagePosition(position: number): number {
+  return Math.min(MAX_LEVEL, Math.max(0, position));
+}
+
 export function positionToVideoTime(position: number, duration: number): number {
-  return (clampPosition(position) / MAX_LEVEL) * duration;
+  return (stagePosition(position) / MAX_LEVEL) * duration;
 }
 
 function videoAssetPath(filename: string): string {
@@ -181,7 +186,7 @@ export function createEvolutionVideoRenderer(
   };
 
   const render = (position: number, onRendered?: () => void): void => {
-    requestedPosition = clampPosition(position);
+    requestedPosition = stagePosition(position);
     requestVersion += 1;
     canvas.dataset.frame = String(
       Math.round(requestedPosition * INTERPOLATION_FACTOR),
