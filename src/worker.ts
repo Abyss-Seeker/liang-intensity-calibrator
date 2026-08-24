@@ -76,7 +76,9 @@ const BUFFER_SCALE = 200; // 超额起点：超额 200 净票缓冲约 2.77 级
 const BUFFER_GAIN = 4; // 超额每翻一倍，缓冲加深约 2.77 级（无上限，边际递减）
 const EVENTS_KEY = "events";
 const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
-const VOTE_TTL_SECONDS = 24 * 60 * 60; // 兜底：未提供 resetAt 时的默认 TTL
+// 北京时间偏移（UTC+8）。每日投票额度按北京时区午夜重置，贴合主要用户群作息。
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+const VOTE_TTL_MAX_SECONDS = 24 * 60 * 60;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -165,14 +167,16 @@ function computeTally(events: VoteEvent[], now: number) {
   };
 }
 
-// 根据用户本地时区的"下一个午夜"时间戳计算 voted:{ip} 的 TTL。
-// resetAt 是前端传来的本地午夜绝对时间戳（毫秒）；TTL 是"离午夜还剩多少秒"，
-// 让每天的投票在用户本地 0 点重置（而非投完 24h）。clamp 到 [1s, 24h]。
-function voteTtlSeconds(resetAt: unknown, now: number): number {
-  const ms = Number(resetAt);
-  if (!Number.isFinite(ms) || ms <= now) return VOTE_TTL_SECONDS;
-  const seconds = Math.round((ms - now) / 1000);
-  return Math.min(Math.max(seconds, 1), VOTE_TTL_SECONDS);
+// 服务端固定 TTL：到下一个北京时间 0 点的剩余秒数。
+// 不信任客户端提交的 resetAt——原实现允许攻击者把 TTL 改为 1 秒，
+// 从而同一 IP 无限刷票；现在重置时间完全由服务端决定，客户端无法干预。
+// 返回 [1, 24h] 秒。
+function ttlToNextBeijingMidnight(now: number): number {
+  const beijingMs = now + BEIJING_OFFSET_MS;
+  const nextMidnightMs =
+    Math.floor(beijingMs / 86_400_000) * 86_400_000 + 86_400_000;
+  const seconds = Math.round((nextMidnightMs - beijingMs) / 1000);
+  return Math.min(Math.max(seconds, 1), VOTE_TTL_MAX_SECONDS);
 }
 
 async function handleVote(request: Request, env: Env): Promise<Response> {
@@ -197,14 +201,12 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   }
 
   let direction: string;
-  let resetAt: unknown;
   try {
     const body = (await request.json()) as {
       direction?: string;
-      resetAt?: unknown;
+      // 注意：不再读取/信任 body.resetAt。每日重置由服务端按北京时间午夜计算。
     };
     direction = body.direction ?? "";
-    resetAt = body.resetAt;
   } catch {
     return json({ reason: "请求体不是合法 JSON" }, 400);
   }
@@ -238,7 +240,7 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   try {
     await env.VOTES.put(EVENTS_KEY, JSON.stringify(trimmed));
     await env.VOTES.put(votedKey, direction, {
-      expirationTtl: voteTtlSeconds(resetAt, now),
+      expirationTtl: ttlToNextBeijingMidnight(now),
     });
   } catch (error) {
     console.error("[vote] KV 写入失败（疑似每日写入配额耗尽）", error);

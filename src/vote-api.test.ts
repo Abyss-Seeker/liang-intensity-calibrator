@@ -4,15 +4,21 @@ import worker from "../dist/server/index.js";
 
 function makeEnv(opts?: { failPuts?: boolean }) {
   const store = new Map<string, string | null>();
+  const putOptions: Record<string, { expirationTtl?: number }> = {};
   const VOTES = {
     async get(key: string) {
       return store.get(key) ?? null;
     },
-    async put(key: string, value: string) {
+    async put(
+      key: string,
+      value: string,
+      options?: { expirationTtl?: number },
+    ) {
       if (opts?.failPuts) {
         throw new Error("KV write quota exceeded");
       }
       store.set(key, value);
+      if (options) putOptions[key] = options;
     },
   };
   return {
@@ -22,6 +28,7 @@ function makeEnv(opts?: { failPuts?: boolean }) {
       },
       VOTES,
     },
+    putOptions,
   };
 }
 
@@ -91,6 +98,94 @@ describe("vote api", () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("sideways"), env);
     expect(response.status).toBe(400);
+  });
+
+  it("忽略客户端 resetAt：不同恶意 resetAt 得到的 TTL 完全相同", async () => {
+    const { env, putOptions } = makeEnv();
+    const base = Date.now();
+    // 攻击者 A：1 秒后过期；攻击者 B：1 天后过期。服务端必须一视同仁。
+    const attackA = new Request("https://example.com/api/vote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "198.51.100.1",
+      },
+      body: JSON.stringify({ direction: "up", resetAt: base + 1000 }),
+    });
+    const attackB = new Request("https://example.com/api/vote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "198.51.100.2",
+      },
+      body: JSON.stringify({ direction: "down", resetAt: base + 86_400_000 }),
+    });
+    expect((await worker.fetch(attackA, env)).status).toBe(200);
+    expect((await worker.fetch(attackB, env)).status).toBe(200);
+    const ttlA = putOptions["voted:198.51.100.1"]?.expirationTtl;
+    const ttlB = putOptions["voted:198.51.100.2"]?.expirationTtl;
+    expect(ttlA).toBe(ttlB);
+    expect(ttlA).toBeGreaterThanOrEqual(1);
+    expect(ttlA).toBeLessThanOrEqual(86_400);
+  });
+
+  it("TTL 由服务端按北京时间午夜固定计算，与客户端输入无关", async () => {
+    const { env, putOptions } = makeEnv();
+    const now = Date.now();
+    // 独立复现服务端公式，验证 worker 输出与"到北京午夜的秒数"一致
+    const beijingMs = now + 8 * 60 * 60 * 1000;
+    const nextMidnightMs =
+      Math.floor(beijingMs / 86_400_000) * 86_400_000 + 86_400_000;
+    const expected = Math.min(
+      Math.max(Math.round((nextMidnightMs - beijingMs) / 1000), 1),
+      86_400,
+    );
+    const response = await worker.fetch(
+      new Request("https://example.com/api/vote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "198.51.100.3",
+        },
+        body: JSON.stringify({ direction: "up", resetAt: 0 }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(putOptions["voted:198.51.100.3"]?.expirationTtl).toBe(expected);
+  });
+
+  it("恶意 resetAt 后同一 IP 立即重投仍被拒绝（刷票路径被堵）", async () => {
+    const { env } = makeEnv();
+    const first = await worker.fetch(
+      new Request("https://example.com/api/vote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "198.51.100.4",
+        },
+        body: JSON.stringify({ direction: "up", resetAt: Date.now() + 1000 }),
+      }),
+      env,
+    );
+    expect(first.status).toBe(200);
+    const second = await worker.fetch(
+      new Request("https://example.com/api/vote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "198.51.100.4",
+        },
+        body: JSON.stringify({ direction: "down", resetAt: Date.now() + 1000 }),
+      }),
+      env,
+    );
+    expect(second.status).toBe(200);
+    const data = await second.json();
+    expect(data.voted).toBe(true);
+    expect(data.votedDirection).toBe("up");
+    expect(data.reason).toContain("已经投过");
+    expect(data.up).toBe(1); // 事件流里只有一票
   });
 
   it("KV 写入失败（配额耗尽）时返回 503 + kv_quota 标识，而非 500 错误页", async () => {

@@ -59,21 +59,12 @@ export async function fetchVotes(): Promise<VoteTally> {
 }
 
 export async function castVote(direction: VoteDirection): Promise<VoteResponse> {
-  // 用户本地时区的下一个午夜（今天 24:00），让每天的投票在本地 0 点重置
-  const now = new Date();
-  const nextMidnight = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
-    0,
-    0,
-    0,
-    0,
-  );
+  // 不再发送 resetAt：每日投票重置由服务端按北京时间午夜固定计算，
+  // 客户端无法再干预 TTL（防止 1 秒 TTL 无限刷票）。
   const response = await fetch("/api/vote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ direction, resetAt: nextMidnight.getTime() }),
+    body: JSON.stringify({ direction }),
   });
   let data: VoteResponse;
   try {
