@@ -13,9 +13,9 @@ export default defineConfig({
     launchOptions: executablePath ? { executablePath } : undefined,
   },
   webServer: {
-    command: `node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${testPort}`,
+    command: `node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${testPort} --strictPort --mode e2e`,
     url: `http://127.0.0.1:${testPort}`,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
   },
   projects: [
     {

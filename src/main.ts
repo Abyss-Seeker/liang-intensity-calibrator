@@ -1,4 +1,5 @@
 import "./styles.css";
+import { mountComments } from "./comments";
 
 import { type AppController, mountApp } from "./app";
 import {
@@ -170,6 +171,7 @@ function showInAppBrowserHint(): void {
 }
 
 controller = mountApp(app, requestDraw);
+mountComments(app);
 renderer = createEvolutionVideoRenderer(controller.portrait);
 controller.setLevel(communityLevel);
 controller.setLoading(0, 1);

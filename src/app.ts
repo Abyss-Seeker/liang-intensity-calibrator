@@ -501,6 +501,9 @@ export function mountApp(
     experience.style.setProperty("--strength-pct", `${strength * 100}%`);
     const inkPct = strength >= 0.75 ? 1 : 0;
     experience.style.setProperty("--ink-pct", `${inkPct * 100}%`);
+    // Community panels follow the continuous background ramp. Switch their
+    // text earlier than the portrait labels to keep mid-tones readable.
+    experience.style.setProperty("--panel-ink-pct", strength >= 0.55 ? "100%" : "0%");
     experience.style.setProperty("--stage-progress", String(state.localProgress));
 
     ticks.forEach((tick, index) => {
