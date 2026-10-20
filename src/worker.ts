@@ -19,6 +19,8 @@ interface Env {
 interface VoteEvent {
   t: number;
   d: "up" | "down";
+  /** 聚合票数：较早的事件按小时合并后给出，缺省视为 1 票 */
+  n?: number;
 }
 
 // 数据缺口：某个时间段内投票因 KV 写入配额耗尽而未被记录。
@@ -76,6 +78,15 @@ const BUFFER_SCALE = 200; // 超额起点：超额 200 净票缓冲约 2.77 级
 const BUFFER_GAIN = 4; // 超额每翻一倍，缓冲加深约 2.77 级（无上限，边际递减）
 const EVENTS_KEY = "events";
 const EVENTS_MAX = 100000; // 事件流上限，超出丢弃最旧
+// —— 事件流瘦身 ——
+// 事件流已涨到 8 万条 / 2.5MB（gzip 后约 400KB），每次 GET 全量下发。
+// 内地 → Cloudflare 的弱链路上，这种体积的 body 传输途中极易被 RST，
+// 前端只拿到 200 响应头就断了，表现为 net::ERR_CONNECTION_RESET (200)。
+// 走势图用不到逐票精度，所以：最近 24 小时保留原始事件（1h/6h/24h 视图
+// 仍是逐票精度），更早的按小时聚合成 { t, d, n }，票数一票不少，
+// 体积降两个数量级。
+const RAW_PRECISION_MS = 24 * 60 * 60 * 1000;
+const BUCKET_MS = 60 * 60 * 1000;
 // 北京时间偏移（UTC+8）。每日投票额度按北京时区午夜重置，贴合主要用户群作息。
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 const VOTE_TTL_MAX_SECONDS = 24 * 60 * 60;
@@ -126,6 +137,38 @@ function voteWeight(ageMs: number): number {
 
 function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "unknown";
+}
+
+// 事件流 → 下发给前端的紧凑形式：近 24 小时原样保留，更早的按小时聚合成 { t, d, n }。
+// 聚合只减少「点」的数量，不改变任何一张票的计数，前端 local 重算结果与全量一致。
+function compactEvents(events: VoteEvent[], now: number): VoteEvent[] {
+  const cutoff = now - RAW_PRECISION_MS;
+  const recent: VoteEvent[] = [];
+  const buckets = new Map<number, { up: number; down: number }>();
+
+  for (const e of events) {
+    if (e.t >= cutoff) {
+      recent.push(e);
+      continue;
+    }
+    const key = Math.floor(e.t / BUCKET_MS) * BUCKET_MS;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { up: 0, down: 0 };
+      buckets.set(key, bucket);
+    }
+    if (e.d === "up") bucket.up += 1;
+    else bucket.down += 1;
+  }
+
+  const older: VoteEvent[] = [];
+  for (const [t, bucket] of buckets) {
+    if (bucket.up > 0) older.push({ t, d: "up", n: bucket.up });
+    if (bucket.down > 0) older.push({ t, d: "down", n: bucket.down });
+  }
+  older.sort((a, b) => a.t - b.t);
+  recent.sort((a, b) => a.t - b.t);
+  return older.concat(recent);
 }
 
 async function readEvents(env: Env): Promise<VoteEvent[]> {
@@ -186,10 +229,12 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "GET") {
     const events = await readEvents(env);
-    const tally = computeTally(events, Date.now());
+    const now = Date.now();
+    const tally = computeTally(events, now);
     return json({
       ...tally,
-      events,
+      // 全量事件只用于算 tally（精确），下发的是瘦身后的紧凑事件流
+      events: compactEvents(events, now),
       gaps: visibleGaps(),
       voted: Boolean(alreadyVoted),
       votedDirection: alreadyVoted ?? null,
@@ -215,12 +260,16 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
     return json({ reason: "方向必须是 up 或 down" }, 400);
   }
 
+  // 注意：以下三条 POST 返回路径都**不回传 events 事件流**。
+  // 事件流已涨到 8 万条 / 2.5MB，把它塞进投票响应会在内地→Cloudflare 的
+  // 弱链路上传输途中被 RST，前端只拿到 200 头 + 断掉的 body，表现为
+  // net::ERR_CONNECTION_RESET (200)。投票响应现在是几百字节，抗抖动。
+  // 前端拿到 tally 后自行在本地补一条事件并重算，图表不依赖这里的 events。
   if (alreadyVoted) {
     const events = await readEvents(env);
     const tally = computeTally(events, Date.now());
     return json({
       ...tally,
-      events,
       gaps: visibleGaps(),
       voted: true,
       votedDirection: alreadyVoted,
@@ -251,7 +300,6 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
         reason:
           "今天的投票人数太火爆，把免费额度冲爆啦。站长正在急头白脸加额度中，稍后再来试试吧！",
         ...computeTally(snapshot, now),
-        events: snapshot,
         gaps: visibleGaps(),
         voted: false,
         votedDirection: null,
@@ -264,7 +312,6 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
   const tally = computeTally(trimmed, now);
   return json({
     ...tally,
-    events: trimmed,
     gaps: visibleGaps(),
     voted: true,
     votedDirection: direction,

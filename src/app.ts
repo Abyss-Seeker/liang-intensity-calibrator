@@ -110,6 +110,8 @@ interface ChartPoint {
   t: number;
   idx: number;
   level: number;
+  /** 累计票数（服务端聚合事件后会大于下标），用于「第 N 票」文案 */
+  count: number;
 }
 
 function measure(svg: SVGSVGElement): { w: number; h: number } {
@@ -130,24 +132,37 @@ function renderChart(
   const now = Date.now();
 
   // 逻辑坐标（x 用时间戳或票序号）
-  let logical: { x: number; y: number; t: number; idx: number }[];
+  let logical: { x: number; y: number; t: number; idx: number; count: number }[];
   let from: number;
   let to: number;
   let tickLabels: string[];
 
   if (rangeKey === "tick") {
-    logical = series.map((p, i) => ({ x: i, y: p.level, t: p.t, idx: i }));
+    logical = series.map((p, i) => ({
+      x: i,
+      y: p.level,
+      t: p.t,
+      idx: i,
+      count: p.count,
+    }));
     from = 0;
     to = Math.max(0, series.length - 1);
     tickLabels = Array.from({ length: 5 }, (_, i) => {
       const idx = Math.round(from + ((to - from) * i) / 4);
-      return `#${idx + 1}`;
+      // 服务端会把较早的票按小时聚合，下标 ≠ 真实票号，这里用累计票数
+      return `#${series[idx]?.count ?? 0}`;
     });
   } else {
     const rangeMs = RANGES[rangeKey]!;
     const visible =
       rangeKey === "all" ? series : series.filter((p) => p.t >= now - rangeMs);
-    logical = visible.map((p, i) => ({ x: p.t, y: p.level, t: p.t, idx: i }));
+    logical = visible.map((p, i) => ({
+      x: p.t,
+      y: p.level,
+      t: p.t,
+      idx: i,
+      count: p.count,
+    }));
     from =
       rangeKey === "all"
         ? series.length
@@ -239,6 +254,7 @@ function renderChart(
     t: p.t,
     idx: p.idx,
     level: p.y,
+    count: p.count,
   }));
 
   if (points.length > 0) {
@@ -730,7 +746,7 @@ export function mountApp(
 
     const state = getProgression(best.level);
     chartTooltipTime.textContent = currentRange === "tick"
-      ? `第 ${best.idx + 1} 票 · ${formatFullTime(best.t, currentRange)}`
+      ? `第 ${best.count} 票 · ${formatFullTime(best.t, currentRange)}`
       : formatFullTime(best.t, currentRange);
     chartTooltipLevel.textContent = `${state.stage} · ${state.level} 级`;
 

@@ -17,6 +17,7 @@ import {
   type VoteDirection,
   type VoteEvent,
   type VoteGap,
+  VoteNetworkError,
   VoteQuotaExceededError,
 } from "./vote";
 
@@ -182,24 +183,33 @@ controller.onVote(async (direction: VoteDirection) => {
   controller?.setVoteState("voting");
   try {
     const result = await castVote(direction);
-    applyTally(result.events, result.gaps);
-    if (result.reason) {
-      controller?.setVoteState(
-        "voted",
-        `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
-      );
+    // 服务端不再在投票响应里回传全量事件流（2.5MB → 几百字节，见 worker.ts）。
+    // 拿到 tally 后本地补一条事件再重算，图表立刻跟手，也不需要再拉一次大 JSON。
+    if (result.events && result.events.length > 0) {
+      applyTally(result.events, result.gaps);
     } else {
-      animateToLevel(communityLevel);
-      controller?.setVoteState(
-        "voted",
-        `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
-      );
+      // reason 非空 = 「今天已经投过票了」，这张票没被追加，别重复补本地事件
+      if (!result.reason) {
+        currentEvents = [...currentEvents, { t: Date.now(), d: direction }];
+      }
+      controller?.setGaps(result.gaps ?? []);
+      recalcLocalTally();
     }
+    if (!result.reason) {
+      animateToLevel(communityLevel);
+    }
+    controller?.setVoteState(
+      "voted",
+      `已投票（${result.votedDirection === "up" ? "往上" : "往下"}）`,
+    );
   } catch (error) {
     if (error instanceof VoteQuotaExceededError) {
       // 免费 KV 写入配额耗尽：投票核心功能瘫痪，弹 banner 让访客知道是限额
       controller?.setVoteState("error", "今日投票额度已用尽");
       controller?.showQuotaBanner(error.message);
+    } else if (error instanceof VoteNetworkError) {
+      // 内地访问 Cloudflare 常见的连接重置：重试已在 castVote 内做过
+      controller?.setVoteState("error", "网络不稳，投票没发出去，请再试一次");
     } else {
       controller?.setVoteState("error", "投票失败，请重试");
     }

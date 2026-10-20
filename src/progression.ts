@@ -131,23 +131,39 @@ export function voteWeight(ageMs: number, halfLifeMs: number): number {
 export interface VoteEventPoint {
   t: number;
   d: "up" | "down";
+  /** 聚合票数（服务端把 24 小时前的票按小时合并），缺省视为 1 票 */
+  n?: number;
+}
+
+function votesOf(event: VoteEventPoint): number {
+  return Math.max(1, Math.floor(event.n ?? 1));
+}
+
+export interface LevelSeriesPoint {
+  t: number;
+  level: number;
+  /** 截至该点的累计票数（聚合事件按 n 累加），用于刻度与 tooltip 的「第 N 票」 */
+  count: number;
 }
 
 // 事件流 → 走势序列：按时间排序，累计加权净票，返回每个时间点的等级。
 // 用滑动窗口（30 天）逐点推进，均摊 O(n)。半衰期由调用方传入。
+// 事件可带 n（聚合票数），此时该点代表一口气投出的 n 票，计数完全等价。
 export function levelSeries(
   events: VoteEventPoint[],
   halfLifeMs: number,
-): { t: number; level: number }[] {
+): LevelSeriesPoint[] {
   const sorted = [...events].sort((a, b) => a.t - b.t);
-  const points: { t: number; level: number }[] = [];
+  const points: LevelSeriesPoint[] = [];
   let upW = 0;
   let downW = 0;
   let lastT = -1;
-  const active: { t: number; d: "up" | "down" }[] = [];
+  let count = 0;
+  const active: { t: number; d: "up" | "down"; n: number }[] = [];
   let head = 0;
 
   for (const e of sorted) {
+    const n = votesOf(e);
     if (lastT >= 0 && e.t > lastT) {
       // 所有活跃票统一随时间衰减
       const w = voteWeight(e.t - lastT, halfLifeMs);
@@ -156,17 +172,18 @@ export function levelSeries(
     }
     // 移除超出 30 天窗口的旧票
     while (head < active.length && e.t - active[head].t > VOTE_WINDOW_MS) {
-      const w = voteWeight(e.t - active[head].t, halfLifeMs);
+      const w = voteWeight(e.t - active[head].t, halfLifeMs) * active[head].n;
       if (active[head].d === "up") upW -= w;
       else downW -= w;
       head += 1;
     }
     // 加入新票（age = 0，权重 = 1）
-    if (e.d === "up") upW += 1;
-    else downW += 1;
-    active.push({ t: e.t, d: e.d });
+    if (e.d === "up") upW += n;
+    else downW += n;
+    count += n;
+    active.push({ t: e.t, d: e.d, n });
     lastT = e.t;
-    points.push({ t: e.t, level: levelFromTally(upW, downW) });
+    points.push({ t: e.t, level: levelFromTally(upW, downW), count });
   }
   return points;
 }
@@ -185,12 +202,13 @@ export function tallyFromEvents(
   for (const e of events) {
     const age = now - e.t;
     if (age < 0 || age > VOTE_WINDOW_MS) continue;
-    const w = voteWeight(age, halfLifeMs);
+    const n = votesOf(e);
+    const w = voteWeight(age, halfLifeMs) * n;
     if (e.d === "up") {
-      up += 1;
+      up += n;
       upW += w;
     } else {
-      down += 1;
+      down += n;
       downW += w;
     }
   }

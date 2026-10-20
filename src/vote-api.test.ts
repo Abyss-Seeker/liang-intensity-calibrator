@@ -57,7 +57,7 @@ describe("vote api", () => {
     expect(data.votedDirection).toBe(null);
   });
 
-  it("POST up 增加 up 票并记录事件流与已投票状态", async () => {
+  it("POST up 增加 up 票并记录已投票状态（响应不再回传事件流）", async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(postVote("up"), env);
     const data = await response.json();
@@ -66,8 +66,10 @@ describe("vote api", () => {
     expect(data.voted).toBe(true);
     expect(data.votedDirection).toBe("up");
     expect(data.level).toBeGreaterThan(15);
-    expect(data.events).toHaveLength(1);
-    expect(data.events[0].d).toBe("up");
+    // 回归保护：投票响应必须保持极小（内地弱链路下大 body 会被 RST）。
+    // 事件流只在 GET 里降采样后给出，POST 一律不带。
+    expect(data.events).toBeUndefined();
+    expect(JSON.stringify(data).length).toBeLessThan(600);
   });
 
   it("GET 能返回当前 IP 的已投票状态", async () => {
@@ -197,7 +199,7 @@ describe("vote api", () => {
     expect(data.reason).toContain("急头白脸");
     // 未记录事件，前端可据此弹 banner
     expect(data.up).toBe(0);
-    expect(data.events).toEqual([]);
+    expect(data.events).toBeUndefined();
   });
 
   it("GET 返回已知事故缺口（2026-08-14 限额爆了的静态窗口）", async () => {

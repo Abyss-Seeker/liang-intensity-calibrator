@@ -2,7 +2,9 @@ import { MAX_LEVEL } from "./progression";
 
 const VIDEO_FPS = 30;
 const INTERPOLATION_FACTOR = 8;
-const LOAD_TIMEOUT_MS = 20_000; // blob 下载 + 媒体就绪总超时
+// blob 下载 + 媒体就绪总超时。视频已从 6.7MB 压到 1.1MB，30s 足够
+// 50KB/s 级别的弱链路跑完；内地访问 Cloudflare 常见 100~300KB/s。
+const LOAD_TIMEOUT_MS = 30_000;
 const DURATION_READY_TIMEOUT_MS = 5_000; // duration 解析超时
 const SEEK_TIMEOUT_MS = 3_000; // seek 确认超时（超时则用当前帧兜底）
 const RVFC_FALLBACK_MS = 100; // rVFC 未触发时的 rAF 兜底延迟
