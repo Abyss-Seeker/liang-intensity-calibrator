@@ -1,3 +1,6 @@
+import { handleComments, type CommentsNamespace } from "./comments-worker";
+export { Comments } from "./comments-worker";
+
 interface AssetsBinding {
   fetch(request: Request): Promise<Response>;
 }
@@ -14,6 +17,7 @@ interface KVNamespace {
 interface Env {
   ASSETS: AssetsBinding;
   VOTES: KVNamespace;
+  COMMENTS?: CommentsNamespace;
 }
 
 interface VoteEvent {
@@ -321,6 +325,9 @@ async function handleVote(request: Request, env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/api/comments" || url.pathname.startsWith("/api/comments/")) {
+      return handleComments(request, env.COMMENTS);
+    }
     if (url.pathname === "/api/vote") {
       return handleVote(request, env);
     }

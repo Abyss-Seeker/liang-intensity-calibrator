@@ -6,6 +6,10 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  "durable_objects": {
+    "bindings": [{ "name": "COMMENTS", "class_name": "Comments" }]
+  },
+  "migrations": [{ "tag": "comments-v1", "new_sqlite_classes": ["Comments"] }],
   "kv_namespaces": [
     {
       "binding": "VOTES",

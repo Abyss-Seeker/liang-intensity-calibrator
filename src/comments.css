@@ -1,0 +1,33 @@
+.comments-panel { --comment-surface: var(--thumb-bg); --ink: color-mix(in srgb, #000, #fff var(--panel-ink-pct, 0%)); --muted: var(--ink); --comment-control-surface: color-mix(in srgb, #fff, #000 var(--panel-ink-pct, 0%)); width: min(100%, 740px); justify-self: center; margin: 32px auto 24px; padding: clamp(18px, 3vw, 30px); border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent); border-radius: 20px; background: var(--comment-surface); color: var(--ink); position: relative; z-index: 6; }
+.comments-heading, .comment-compose-footer, .comments-toolbar, .comment-meta, .comment-actions, .comments-pagination { display: flex; align-items: center; gap: 12px; }
+.comments-heading, .comments-toolbar, .comment-compose-footer { justify-content: space-between; }
+.comments-eyebrow { color: var(--muted); font-size: 11px; letter-spacing: .12em; margin: 0 0 6px; }
+.comments-heading h2 { font-family: "Songti SC", STSong, "SimSun", serif; margin: 0; font-size: 26px; }
+.comments-badge { border: 1px solid currentColor; border-radius: 20px; padding: 5px 9px; font-size: 11px; white-space: nowrap; color: var(--muted); }
+.comments-intro, #comment-rules, .comments-sort-hint { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.comment-form { margin: 22px 0; }
+.comment-form label { display: block; font-size: 13px; margin-bottom: 9px; }
+.comment-form textarea { display: block; width: 100%; min-height: 100px; max-height: 320px; resize: vertical; border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent); border-radius: 12px; padding: 12px; font: inherit; font-size: 14px; line-height: 1.65; background: color-mix(in srgb, var(--comment-control-surface) 6%, var(--comment-surface)); color: var(--ink); }
+.comment-form textarea::placeholder { color: var(--muted); }
+.comments-panel button { cursor: pointer; min-height: 40px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent); background: transparent; color: inherit; padding: 7px 13px; font-size: 12px; }
+.comments-panel button:disabled { opacity: .45; cursor: default; }
+.comments-panel button:focus-visible, .comment-form textarea:focus-visible { outline: 2px solid #4d6bfe; outline-offset: 3px; }
+.comments-panel button[aria-pressed="true"] { background: color-mix(in srgb, var(--comment-control-surface) 10%, var(--comment-surface)); border-color: #4d6bfe; }
+.comment-compose-footer { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.comment-compose-footer button { background: var(--ink); color: var(--comment-surface); border-color: transparent; font-weight: 700; padding-inline: 20px; }
+#comment-rules { font-size: 11px; }
+.comments-toolbar [role="group"] { display: flex; gap: 6px; }
+.comments-sort-hint { font-size: 11px; }
+.comments-status { font-size: 13px; line-height: 1.7; min-height: 22px; margin: 10px 0; }
+.comments-list { list-style: none; padding: 0; margin: 0; }
+.comments-list li { padding: 20px 0; border-top: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
+.comment-meta { font-size: 12px; }
+.comment-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--muted); font-size: 11px; }
+.comment-meta time { color: var(--muted); margin-left: auto; font-size: 11px; }
+.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; font-size: 14px; margin: 12px 0; unicode-bidi: plaintext; }
+.comment-actions { gap: 8px; flex-wrap: wrap; }
+.comment-actions button { min-width: 64px; }
+.comment-score { color: var(--muted); font-size: 11px; margin-left: auto; }
+.comments-pagination { justify-content: center; font-size: 12px; padding-top: 16px; }
+.comments-pagination[hidden] { display: none; }
+@media (max-width: 400px) { .comments-panel { padding: 16px; } .comments-heading h2 { font-size: 23px; } .comment-meta { gap: 8px; } }

@@ -16,6 +16,7 @@
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0",
     "jsdom": "^26.1.0",
+    "miniflare": "5.20260801.1-alpha",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10",
